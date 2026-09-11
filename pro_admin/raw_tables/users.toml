@@ -1,0 +1,38 @@
+[table]
+title = "Users"
+all_columns = true
+page_size = 20
+hidden_columns = ["hashed_password"]
+
+[[table.columns]]
+title = "ID"
+field = "id"
+width = 80
+
+[[table.columns]]
+title = "Full Name"
+field = "full_name"
+
+[[table.columns]]
+title = "Email"
+field = "email"
+
+[[table.columns]]
+title = "Role"
+field = "role"
+
+[[table.columns]]
+title = "Created At"
+field = "created_at"
+
+[create]
+enable = true
+hidden_columns = ["id", "created_at"]
+
+[update]
+enable = true
+hidden_columns = ["hashed_password"]
+readonly_columns = ["id", "created_at"]
+
+[delete]
+enable = false

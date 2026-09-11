@@ -1,0 +1,103 @@
+use config::{Config as ConfigBuilder, Environment, File, FileFormat};
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Config {
+    #[serde(default = "default_database_url")]
+    pub database_url: String,
+    #[serde(default = "default_jwt_secret")]
+    pub jwt_secret: String,
+    #[serde(default = "default_jwt_expiry_hours")]
+    pub jwt_expiry_hours: i64,
+    #[serde(default = "default_server_host")]
+    pub server_host: String,
+    #[serde(default = "default_server_port")]
+    pub server_port: u16,
+    #[serde(default = "default_admin_email")]
+    pub admin_email: String,
+    #[serde(default = "default_admin_password")]
+    pub admin_password: String,
+    #[serde(default = "default_admin_name")]
+    pub admin_name: String,
+}
+
+fn default_database_url() -> String {
+    "postgresql://postgres:password@localhost:5432/internship_db".to_string()
+}
+
+fn default_jwt_secret() -> String {
+    "super-secret-jwt-key-replace-in-production".to_string()
+}
+
+fn default_jwt_expiry_hours() -> i64 {
+    24
+}
+
+fn default_server_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_server_port() -> u16 {
+    8000
+}
+
+fn default_admin_email() -> String {
+    "admin@internship.local".to_string()
+}
+
+fn default_admin_password() -> String {
+    "admin".to_string()
+}
+
+fn default_admin_name() -> String {
+    "Admin User".to_string()
+}
+
+impl Config {
+    pub fn builder() -> config::builder::ConfigBuilder<config::builder::DefaultState> {
+        ConfigBuilder::builder()
+    }
+
+    pub fn load() -> Result<Self, anyhow::Error> {
+        dotenvy::dotenv().ok();
+
+        // Support legacy Python FastAPI SECRET_KEY if JWT_SECRET is not explicitly provided
+        if std::env::var("JWT_SECRET").is_err() {
+            if let Ok(secret) = std::env::var("SECRET_KEY") {
+                std::env::set_var("JWT_SECRET", secret);
+            }
+        }
+
+        let builder = Config::builder()
+            // Optional configuration and secret files
+            .add_source(File::new("config.toml", FileFormat::Toml).required(false))
+            .add_source(File::new("secrets.toml", FileFormat::Toml).required(false))
+            .add_source(File::new("Secrets.toml", FileFormat::Toml).required(false))
+            // Standard environment variables (DATABASE_URL, JWT_SECRET, SERVER_PORT, etc.)
+            .add_source(
+                Environment::default()
+                    .separator("__")
+                    .try_parsing(true)
+                    .ignore_empty(true),
+            )
+            // Application-prefixed environment variables (e.g. APP_DATABASE_URL, APP_SERVER_PORT)
+            .add_source(
+                Environment::with_prefix("APP")
+                    .prefix_separator("_")
+                    .separator("__")
+                    .try_parsing(true)
+                    .ignore_empty(true),
+            )
+            // Project-prefixed environment variables (e.g. INTERNSHIP_DATABASE_URL)
+            .add_source(
+                Environment::with_prefix("INTERNSHIP")
+                    .prefix_separator("_")
+                    .separator("__")
+                    .try_parsing(true)
+                    .ignore_empty(true),
+            );
+
+        let config: Config = builder.build()?.try_deserialize()?;
+        Ok(config)
+    }
+}

@@ -1,0 +1,15 @@
+<html>
+
+<head>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const t = urlParams.get('t');
+        localStorage.setItem('auth_token', t);
+        window.location.href = "/admin/";
+    </script>
+</head>
+
+<body>
+</body>
+
+</html>

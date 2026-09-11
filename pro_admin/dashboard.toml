@@ -1,0 +1,17 @@
+title = "Internship System Dashboard"
+subtitle = "Manage Users, Opportunities, and Applications via SeaORM Pro"
+
+[[info.card]]
+title = "Users Management"
+description = "Manage system accounts, review applicants, and assign administrator privileges."
+link = "/admin/table/users"
+
+[[info.card]]
+title = "Opportunities"
+description = "Post new internship and job openings, update descriptions, and close applications."
+link = "/admin/table/opportunities"
+
+[[info.card]]
+title = "Applications"
+description = "Track submitted candidate applications, review cover letters, and accept or reject candidates."
+link = "/admin/table/applications"

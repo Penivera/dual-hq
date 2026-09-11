@@ -1,0 +1,41 @@
+[table]
+title = "Applications"
+all_columns = true
+page_size = 20
+
+[[table.columns]]
+title = "ID"
+field = "id"
+width = 80
+
+[[table.columns]]
+title = "User ID"
+field = "user_id"
+
+[[table.columns]]
+title = "Opportunity ID"
+field = "opportunity_id"
+
+[[table.columns]]
+title = "Cover Letter"
+field = "cover_letter"
+ellipsis = true
+
+[[table.columns]]
+title = "Status"
+field = "status"
+
+[[table.columns]]
+title = "Applied At"
+field = "applied_at"
+
+[create]
+enable = true
+hidden_columns = ["id", "applied_at", "updated_at"]
+
+[update]
+enable = true
+readonly_columns = ["id", "user_id", "opportunity_id", "applied_at"]
+
+[delete]
+enable = true

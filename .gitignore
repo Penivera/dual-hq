@@ -1,0 +1,6 @@
+keys.txt
+target/
+.env
+.env.*
+!.env.example
+.playwright-cli/
