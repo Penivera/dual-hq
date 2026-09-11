@@ -61,14 +61,16 @@ check_prerequisites() {
 prepare_environment() {
     echo -e "${CYAN}--> Setting up environment configuration...${NC}"
     if [ ! -f .env ]; then
+        RANDOM_JWT=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
         if [ -f .env.example ]; then
-            echo -e "${YELLOW}Notice: .env not found. Copying .env.example to .env...${NC}"
+            echo -e "${YELLOW}Notice: .env not found. Initializing from .env.example with secure random JWT secret...${NC}"
             cp .env.example .env
+            sed -i "s/JWT_SECRET=.*/JWT_SECRET=${RANDOM_JWT}/" .env
         else
-            echo -e "${YELLOW}Notice: Creating default .env...${NC}"
-            cat << 'EOF' > .env
-DATABASE_URL=${DATABASE_URL:-postgresql://postgres:admin@localhost:5432/internship_db}
-JWT_SECRET=super-secret-jwt-key-minimum-32-chars-long-internship
+            echo -e "${YELLOW}Notice: Creating default .env with secure random JWT secret...${NC}"
+            cat << EOF > .env
+DATABASE_URL=\${DATABASE_URL:-postgresql://postgres:admin@localhost:5432/internship_db}
+JWT_SECRET=${RANDOM_JWT}
 JWT_EXPIRY_HOURS=24
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8010
