@@ -42,6 +42,11 @@ COPY --from=builder /usr/local/bin/seed /usr/local/bin/seed
 COPY --from=builder /build/assets /app/assets
 COPY --from=builder /build/pro_admin /app/pro_admin
 
+# Copy runtime entrypoint and healthcheck scripts
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY healthcheck.sh /usr/local/bin/healthcheck.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh
+
 ENV RUST_LOG=info
 ENV HOST=0.0.0.0
 ENV PORT=8000
@@ -50,6 +55,6 @@ ENV ADMIN_ASSETS_PATH=/app/assets/admin
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/api/health || exit 1
+    CMD /usr/local/bin/healthcheck.sh
 
-ENTRYPOINT ["/usr/local/bin/internship-api"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

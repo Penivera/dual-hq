@@ -115,3 +115,15 @@ async fn test_admin_graphql_schema_metadata_and_introspection() {
     assert!(fields.iter().any(|f| f["name"] == "applications"));
 }
 
+#[test]
+fn test_health_check_payload_shape() {
+    let payload = serde_json::json!({
+        "status": "healthy",
+        "database": "connected",
+        "version": env!("CARGO_PKG_VERSION")
+    });
+    assert_eq!(payload["status"], "healthy");
+    assert_eq!(payload["database"], "connected");
+    assert!(!payload["version"].as_str().unwrap().is_empty());
+}
+

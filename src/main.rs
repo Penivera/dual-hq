@@ -25,6 +25,25 @@ async fn fallback_handler() -> impl IntoResponse {
     )
 }
 
+async fn health_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl IntoResponse {
+    let db_healthy = state.db.ping().await.is_ok();
+    let status_code = if db_healthy {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status_code,
+        Json(json!({
+            "status": if db_healthy { "healthy" } else { "degraded" },
+            "database": if db_healthy { "connected" } else { "disconnected" },
+            "version": env!("CARGO_PKG_VERSION")
+        })),
+    )
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -62,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         // Mount Swagger UI
         .merge(swagger_router)
-        // Root redirect / health check
+        // Root redirect
         .route(
             "/",
             get(|| async {
@@ -74,6 +93,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }))
             }),
         )
+        // Health check endpoints
+        .route("/health", get(health_handler))
+        .route("/api/health", get(health_handler))
         // Serve favicon.ico at root
         .route_service(
             "/favicon.ico",
