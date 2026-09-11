@@ -67,7 +67,7 @@ prepare_environment() {
         else
             echo -e "${YELLOW}Notice: Creating default .env...${NC}"
             cat << 'EOF' > .env
-DATABASE_URL=postgresql://postgres:admin@db:5432/internship_db
+DATABASE_URL=${DATABASE_URL:-postgresql://postgres:admin@localhost:5432/internship_db}
 JWT_SECRET=super-secret-jwt-key-minimum-32-chars-long-internship
 JWT_EXPIRY_HOURS=24
 SERVER_HOST=0.0.0.0

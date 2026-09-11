@@ -15,8 +15,8 @@ services:
       - traefik.docker.network=coolify
     environment:
       - SERVICE_TYPE=web
-      - DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-admin}@db:5432/${POSTGRES_DB:-internship_db}}
-      - JWT_SECRET=${JWT_SECRET:-super-secret-jwt-key-minimum-32-chars-long-internship}
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRY_HOURS=${JWT_EXPIRY_HOURS:-24}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
@@ -24,38 +24,10 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - ADMIN_NAME=${ADMIN_NAME:-Admin User}
       - RUST_LOG=${RUST_LOG:-internship_api=info,tower_http=info}
-    depends_on:
-      db:
-        condition: service_healthy
     networks:
       - coolify
     volumes:
       - ./logs:/app/logs
-
-  db:
-    image: postgres:16-alpine
-    container_name: dual_hq_db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin}
-      - POSTGRES_DB=${POSTGRES_DB:-internship_db}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-internship_db}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    networks:
-      - coolify
-
-volumes:
-  postgres_data:
-    name: dual_hq_postgres_data
 
 networks:
   coolify:
