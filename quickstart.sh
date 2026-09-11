@@ -71,7 +71,7 @@ DATABASE_URL=${DATABASE_URL:-postgresql://postgres:admin@localhost:5432/internsh
 JWT_SECRET=super-secret-jwt-key-minimum-32-chars-long-internship
 JWT_EXPIRY_HOURS=24
 SERVER_HOST=0.0.0.0
-SERVER_PORT=8000
+SERVER_PORT=8010
 ADMIN_EMAIL=admin@internship.local
 ADMIN_PASSWORD=admin
 ADMIN_NAME=Admin User
@@ -91,7 +91,7 @@ EOF
 }
 
 wait_for_service() {
-    local port="${PORT:-8000}"
+    local port="${PORT:-8010}"
     local max_attempts=60
     local attempt=1
     local url="http://127.0.0.1:${port}/api/health"
@@ -113,7 +113,7 @@ wait_for_service() {
 }
 
 verify_endpoints() {
-    local port="${PORT:-8000}"
+    local port="${PORT:-8010}"
     echo -e "${CYAN}--> Verifying endpoints...${NC}"
 
     # Verify Health
@@ -133,7 +133,7 @@ verify_endpoints() {
 }
 
 show_summary() {
-    local port="${PORT:-8000}"
+    local port="${PORT:-8010}"
     echo ""
     echo -e "${GREEN}${BOLD}======================================================================${NC}"
     echo -e "${GREEN}${BOLD}               🚀  All Services Running Successfully                 ${NC}"

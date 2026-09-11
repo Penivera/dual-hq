@@ -49,10 +49,11 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh
 
 ENV RUST_LOG=info
 ENV HOST=0.0.0.0
-ENV PORT=8000
+ENV PORT=8010
+ENV SERVER_PORT=8010
 ENV ADMIN_ASSETS_PATH=/app/assets/admin
 
-EXPOSE 8000
+EXPOSE 8010
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD /usr/local/bin/healthcheck.sh
