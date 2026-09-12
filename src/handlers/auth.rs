@@ -26,9 +26,14 @@ use crate::{
     },
 };
 
+fn get_argon2() -> Argon2<'static> {
+    let params = argon2::Params::new(19456, 2, 1, None).unwrap_or_default();
+    Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+}
+
 pub fn hash_password(password: &str) -> Result<String, AppError> {
     let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
+    let argon2 = get_argon2();
     let password_hash = argon2
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| AppError::Internal(format!("Failed to hash password: {e}")))?
@@ -41,7 +46,7 @@ pub fn verify_password(password: &str, hashed_password: &str) -> bool {
         Ok(h) => h,
         Err(_) => return false,
     };
-    Argon2::default()
+    get_argon2()
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok()
 }

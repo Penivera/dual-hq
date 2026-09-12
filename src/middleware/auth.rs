@@ -61,10 +61,30 @@ where
 
         let role = match token_data.claims.role.as_str() {
             "admin" => UserRole::Admin,
-            _ => UserRole::Applicant,
+            "applicant" => UserRole::Applicant,
+            _ => return Err(AppError::Unauthorized("Could not validate credentials".to_string())),
         };
 
         Ok(AuthenticatedUser { id: user_id, role })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ApplicantUser(pub AuthenticatedUser);
+
+impl<S> FromRequestParts<S> for ApplicantUser
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let user = AuthenticatedUser::from_request_parts(parts, state).await?;
+        if user.role != UserRole::Applicant {
+            return Err(AppError::Forbidden("Applicant access required".to_string()));
+        }
+        Ok(ApplicantUser(user))
     }
 }
 

@@ -29,6 +29,21 @@ pub struct OpportunityUpdate {
     pub status: Option<OpportunityStatus>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct OpportunityFullUpdate {
+    #[schema(example = "Senior Rust Intern")]
+    pub title: String,
+    #[schema(example = "Build high performance microservices")]
+    pub description: String,
+    #[schema(example = "Acme Corp")]
+    pub company: String,
+    #[schema(example = "Remote")]
+    pub location: String,
+    #[serde(rename = "type")]
+    pub type_: OpportunityType,
+    pub status: OpportunityStatus,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct OpportunityResponse {
     pub id: i32,
@@ -45,6 +60,8 @@ pub struct OpportunityResponse {
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct PaginationQuery {
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
     pub skip: Option<u64>,
     pub limit: Option<u64>,
 }

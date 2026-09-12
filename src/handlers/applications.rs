@@ -5,7 +5,8 @@ use axum::{
     Json,
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, Order, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, Order, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
 
 use crate::{
@@ -17,8 +18,10 @@ use crate::{
         Application, Opportunity,
     },
     errors::{AppError, ErrorDetail},
-    middleware::{AdminUser, AuthenticatedUser},
-    schemas::application::{ApplicationCreate, ApplicationResponse, ApplicationStatusUpdate},
+    middleware::{AdminUser, ApplicantUser, AuthenticatedUser},
+    schemas::application::{
+        ApplicationCreate, ApplicationDetailResponse, ApplicationResponse, ApplicationStatusUpdate,
+    },
 };
 
 fn model_to_response(app: application::Model) -> ApplicationResponse {
@@ -43,15 +46,18 @@ fn model_to_response(app: application::Model) -> ApplicationResponse {
         (status = 201, description = "Application submitted successfully", body = ApplicationResponse),
         (status = 400, description = "Cannot apply to a closed opportunity", body = ErrorDetail),
         (status = 401, description = "Unauthorized", body = ErrorDetail),
+        (status = 403, description = "Applicant access required", body = ErrorDetail),
         (status = 404, description = "Opportunity not found", body = ErrorDetail),
         (status = 409, description = "You have already applied to this opportunity", body = ErrorDetail)
     )
 )]
 pub async fn apply(
     State(state): State<AppState>,
-    user: AuthenticatedUser,
+    applicant_user: ApplicantUser,
     Json(payload): Json<ApplicationCreate>,
 ) -> Result<impl IntoResponse, AppError> {
+    let user_id = applicant_user.0.id;
+
     // 1. Check opportunity exists and is open
     let opp = Opportunity::find_by_id(payload.opportunity_id)
         .one(&state.db)
@@ -66,7 +72,7 @@ pub async fn apply(
 
     // 2. Check for duplicate application
     let existing_app = Application::find()
-        .filter(application::Column::UserId.eq(user.id))
+        .filter(application::Column::UserId.eq(user_id))
         .filter(application::Column::OpportunityId.eq(payload.opportunity_id))
         .one(&state.db)
         .await?;
@@ -79,7 +85,7 @@ pub async fn apply(
 
     let now = chrono::Utc::now().into();
     let new_app = application::ActiveModel {
-        user_id: Set(user.id),
+        user_id: Set(user_id),
         opportunity_id: Set(payload.opportunity_id),
         cover_letter: Set(payload.cover_letter),
         status: Set(ApplicationStatus::Pending),
@@ -90,16 +96,22 @@ pub async fn apply(
 
     let app = new_app.insert(&state.db).await?;
 
-    // Send confirmation email to applicant
-    if let Ok(Some(applicant)) = crate::entities::User::find_by_id(user.id).one(&state.db).await {
-        crate::email::send_application_submitted_email(
-            state.config.clone(),
-            applicant.email,
-            applicant.full_name,
-            opp.title,
-            opp.company,
-        );
-    }
+    // Asynchronously dispatch confirmation email without blocking the response
+    let db_clone = state.db.clone();
+    let config_clone = state.config.clone();
+    let opp_title = opp.title;
+    let opp_company = opp.company;
+    tokio::spawn(async move {
+        if let Ok(Some(applicant)) = crate::entities::User::find_by_id(user_id).one(&db_clone).await {
+            crate::email::send_application_submitted_email(
+                config_clone,
+                applicant.email,
+                applicant.full_name,
+                opp_title,
+                opp_company,
+            );
+        }
+    });
 
     Ok((StatusCode::CREATED, Json(model_to_response(app))))
 }
@@ -121,6 +133,7 @@ pub async fn list_applications(
 ) -> Result<Json<Vec<ApplicationResponse>>, AppError> {
     let applications = Application::find()
         .order_by(application::Column::AppliedAt, Order::Desc)
+        .limit(100)
         .all(&state.db)
         .await?;
 
@@ -134,21 +147,44 @@ pub async fn list_applications(
     tag = "Applications",
     security(("bearerAuth" = [])),
     responses(
-        (status = 200, description = "Current user's applications", body = [ApplicationResponse]),
+        (status = 200, description = "Current user's applications with opportunity details joined", body = [ApplicationDetailResponse]),
         (status = 401, description = "Unauthorized", body = ErrorDetail)
     )
 )]
 pub async fn my_applications(
     State(state): State<AppState>,
     user: AuthenticatedUser,
-) -> Result<Json<Vec<ApplicationResponse>>, AppError> {
-    let applications = Application::find()
+) -> Result<Json<Vec<ApplicationDetailResponse>>, AppError> {
+    // Join opportunity title and company in a single query via find_also_related
+    let applications_with_opp = Application::find()
         .filter(application::Column::UserId.eq(user.id))
+        .find_also_related(Opportunity)
         .order_by(application::Column::AppliedAt, Order::Desc)
+        .limit(100)
         .all(&state.db)
         .await?;
 
-    let response = applications.into_iter().map(model_to_response).collect();
+    let response = applications_with_opp
+        .into_iter()
+        .map(|(app, opp)| {
+            let (opp_title, opp_company) = match opp {
+                Some(o) => (o.title, o.company),
+                None => ("Deleted Opportunity".to_string(), "Unknown".to_string()),
+            };
+            ApplicationDetailResponse {
+                id: app.id,
+                user_id: app.user_id,
+                opportunity_id: app.opportunity_id,
+                opportunity_title: opp_title,
+                company: opp_company,
+                cover_letter: app.cover_letter,
+                status: app.status,
+                applied_at: app.applied_at,
+                updated_at: app.updated_at,
+            }
+        })
+        .collect();
+
     Ok(Json(response))
 }
 
@@ -195,10 +231,10 @@ pub async fn get_application(
     request_body = ApplicationStatusUpdate,
     responses(
         (status = 200, description = "Application status updated", body = ApplicationResponse),
-        (status = 400, description = "Invalid status transition", body = ErrorDetail),
         (status = 401, description = "Unauthorized", body = ErrorDetail),
         (status = 403, description = "Access denied", body = ErrorDetail),
-        (status = 404, description = "Application not found", body = ErrorDetail)
+        (status = 404, description = "Application not found", body = ErrorDetail),
+        (status = 422, description = "Invalid status transition", body = ErrorDetail)
     )
 )]
 pub async fn update_application_status(
@@ -214,30 +250,30 @@ pub async fn update_application_status(
 
     if user.role == UserRole::Admin {
         if app.status != ApplicationStatus::Pending {
-            return Err(AppError::BadRequest(
-                "Can only accept or reject pending applications".to_string(),
+            return Err(AppError::Validation(
+                "Admin can only update pending applications to accepted or rejected".to_string(),
             ));
         }
         if payload.status != ApplicationStatus::Accepted
             && payload.status != ApplicationStatus::Rejected
         {
-            return Err(AppError::BadRequest(
-                "Admin can only set status to accepted or rejected".to_string(),
+            return Err(AppError::Validation(
+                "Admin can only transition status to accepted or rejected".to_string(),
             ));
         }
     } else {
-        // Regular user
+        // Regular applicant user
         if app.user_id != user.id {
             return Err(AppError::Forbidden("Access denied".to_string()));
         }
         if payload.status != ApplicationStatus::Withdrawn {
-            return Err(AppError::BadRequest(
-                "You can only withdraw your application".to_string(),
+            return Err(AppError::Validation(
+                "Applicants can only transition status to withdrawn".to_string(),
             ));
         }
         if app.status != ApplicationStatus::Pending {
-            return Err(AppError::BadRequest(
-                "Can only withdraw pending applications".to_string(),
+            return Err(AppError::Validation(
+                "Only pending applications can be withdrawn".to_string(),
             ));
         }
     }
@@ -248,7 +284,7 @@ pub async fn update_application_status(
 
     let updated = active.update(&state.db).await?;
 
-    // Send status update notification email to applicant
+    // Fire-and-forget notification email to applicant
     let db_clone = state.db.clone();
     let config_clone = state.config.clone();
     let user_id = updated.user_id;
@@ -282,16 +318,16 @@ pub async fn update_application_status(
         ("id" = i32, Path, description = "Application ID")
     ),
     responses(
-        (status = 204, description = "Application withdrawn/deleted (user only)"),
-        (status = 400, description = "Can only delete pending applications", body = ErrorDetail),
+        (status = 204, description = "Application deleted (applicant only)"),
         (status = 401, description = "Unauthorized", body = ErrorDetail),
         (status = 403, description = "Access denied", body = ErrorDetail),
-        (status = 404, description = "Application not found", body = ErrorDetail)
+        (status = 404, description = "Application not found", body = ErrorDetail),
+        (status = 422, description = "Can only delete pending applications", body = ErrorDetail)
     )
 )]
 pub async fn delete_application(
     State(state): State<AppState>,
-    user: AuthenticatedUser,
+    applicant: ApplicantUser,
     Path(id): Path<i32>,
 ) -> Result<StatusCode, AppError> {
     let app = Application::find_by_id(id)
@@ -299,12 +335,12 @@ pub async fn delete_application(
         .await?
         .ok_or_else(|| AppError::NotFound("Application not found".to_string()))?;
 
-    if app.user_id != user.id {
+    if app.user_id != applicant.0.id {
         return Err(AppError::Forbidden("Access denied".to_string()));
     }
 
     if app.status != ApplicationStatus::Pending {
-        return Err(AppError::BadRequest(
+        return Err(AppError::Validation(
             "Can only delete pending applications".to_string(),
         ));
     }

@@ -1,3 +1,3 @@
 pub mod auth;
 
-pub use auth::{AdminUser, AuthenticatedUser};
+pub use auth::{AdminUser, ApplicantUser, AuthenticatedUser};

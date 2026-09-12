@@ -519,7 +519,7 @@ impl QueryRoot {
         let users = query.offset(offset).limit(limit).all(db).await?;
 
         let pages = if limit > 0 {
-            (total + limit - 1) / limit
+            total.div_ceil(limit)
         } else {
             1
         };
@@ -607,7 +607,7 @@ impl QueryRoot {
         let opps = query.offset(offset).limit(limit).all(db).await?;
 
         let pages = if limit > 0 {
-            (total + limit - 1) / limit
+            total.div_ceil(limit)
         } else {
             1
         };
@@ -697,7 +697,7 @@ impl QueryRoot {
         let apps = query.offset(offset).limit(limit).all(db).await?;
 
         let pages = if limit > 0 {
-            (total + limit - 1) / limit
+            total.div_ceil(limit)
         } else {
             1
         };

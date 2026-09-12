@@ -12,8 +12,15 @@ use internship_api::{
     db::{init_db, AppState},
     routes::{self, ApiDoc},
 };
+use std::time::Duration;
 use serde_json::json;
-use tower_http::{cors::CorsLayer, services::ServeFile, trace::TraceLayer};
+use tower_http::{
+    compression::CompressionLayer,
+    cors::CorsLayer,
+    services::ServeFile,
+    timeout::TimeoutLayer,
+    trace::TraceLayer,
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -130,6 +137,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(app_state)
         // Middleware layers
         .layer(CorsLayer::permissive())
+        .layer(CompressionLayer::new())
+        .layer(TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(30)))
         .layer(TraceLayer::new_for_http());
 
     let addr = format!("{}:{}", config.server_host, config.server_port);

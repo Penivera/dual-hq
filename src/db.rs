@@ -14,11 +14,11 @@ pub struct AppState {
 
 pub async fn init_db(config: &Config) -> Result<DatabaseConnection, DbErr> {
     let mut opt = ConnectOptions::new(&config.database_url);
-    opt.max_connections(25)
-        .min_connections(2)
-        .connect_timeout(Duration::from_secs(15))
-        .acquire_timeout(Duration::from_secs(15))
-        .idle_timeout(Duration::from_secs(300))
+    opt.max_connections(config.db_max_connections)
+        .min_connections(config.db_min_connections)
+        .connect_timeout(Duration::from_secs(config.db_connect_timeout_secs))
+        .acquire_timeout(Duration::from_secs(config.db_connect_timeout_secs))
+        .idle_timeout(Duration::from_secs(config.db_idle_timeout_secs))
         .max_lifetime(Duration::from_secs(1800));
 
     let db = Database::connect(opt).await?;

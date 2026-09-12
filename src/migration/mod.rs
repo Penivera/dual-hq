@@ -2,6 +2,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20240101_000001_create_tables;
 mod m20240101_000002_add_verification;
+mod m20240101_000003_enforce_constraints;
 
 pub struct Migrator;
 
@@ -11,6 +12,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20240101_000001_create_tables::Migration),
             Box::new(m20240101_000002_add_verification::Migration),
+            Box::new(m20240101_000003_enforce_constraints::Migration),
         ]
     }
 }

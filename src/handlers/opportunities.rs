@@ -18,7 +18,7 @@ use crate::{
     errors::{AppError, ErrorDetail},
     middleware::{AdminUser, AuthenticatedUser},
     schemas::opportunity::{
-        OpportunityCreate, OpportunityResponse, OpportunityUpdate, PaginationQuery,
+        OpportunityCreate, OpportunityFullUpdate, OpportunityResponse, PaginationQuery,
     },
 };
 
@@ -52,14 +52,15 @@ pub async fn list_opportunities(
     _user: AuthenticatedUser,
     Query(query): Query<PaginationQuery>,
 ) -> Result<Json<Vec<OpportunityResponse>>, AppError> {
-    let skip = query.skip.unwrap_or(0);
-    let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.or(query.limit).unwrap_or(20).clamp(1, 100);
+    let offset = query.skip.unwrap_or((page - 1) * per_page);
 
     let opportunities = Opportunity::find()
         .filter(opportunity::Column::Status.eq(OpportunityStatus::Open))
         .order_by(opportunity::Column::CreatedAt, Order::Desc)
-        .offset(skip)
-        .limit(limit)
+        .offset(offset)
+        .limit(per_page)
         .all(&state.db)
         .await?;
 
@@ -103,7 +104,8 @@ pub async fn get_opportunity(
     responses(
         (status = 201, description = "Opportunity created (admin only)", body = OpportunityResponse),
         (status = 401, description = "Unauthorized", body = ErrorDetail),
-        (status = 403, description = "Admin access required", body = ErrorDetail)
+        (status = 403, description = "Admin access required", body = ErrorDetail),
+        (status = 422, description = "Validation error on missing or empty fields", body = ErrorDetail)
     )
 )]
 pub async fn create_opportunity(
@@ -111,6 +113,16 @@ pub async fn create_opportunity(
     _admin: AdminUser,
     Json(payload): Json<OpportunityCreate>,
 ) -> Result<impl IntoResponse, AppError> {
+    if payload.title.trim().is_empty()
+        || payload.description.trim().is_empty()
+        || payload.company.trim().is_empty()
+        || payload.location.trim().is_empty()
+    {
+        return Err(AppError::Validation(
+            "Title, description, company, and location are required and cannot be empty".to_string(),
+        ));
+    }
+
     let now = chrono::Utc::now().into();
     let new_opp = opportunity::ActiveModel {
         title: Set(payload.title),
@@ -126,17 +138,22 @@ pub async fn create_opportunity(
 
     let opp = new_opp.insert(&state.db).await?;
 
-    // Trigger notification hook for all registered student/applicant users
+    // Trigger notification hook for registered student/applicant users (fire-and-forget background task)
     let db_clone = state.db.clone();
     let config_clone = state.config.clone();
-    let opp_id = opp.id;
-    let title = opp.title.clone();
-    let company = opp.company.clone();
-    let location = opp.location.clone();
-    let opp_type = format!("{:?}", opp.type_);
+    let opp_payload = crate::email::OpportunityNotificationPayload {
+        title: opp.title.clone(),
+        company: opp.company.clone(),
+        location: opp.location.clone(),
+        opp_type: format!("{:?}", opp.type_),
+        stipend: None,
+        opportunity_id: opp.id,
+    };
+
     tokio::spawn(async move {
         if let Ok(students) = crate::entities::User::find()
             .filter(crate::entities::user::Column::Role.eq(crate::entities::user::UserRole::Applicant))
+            .limit(1000)
             .all(&db_clone)
             .await
         {
@@ -145,12 +162,7 @@ pub async fn create_opportunity(
                     config_clone.clone(),
                     student.email,
                     student.full_name,
-                    title.clone(),
-                    company.clone(),
-                    location.clone(),
-                    opp_type.clone(),
-                    None,
-                    opp_id,
+                    opp_payload.clone(),
                 );
             }
         }
@@ -167,45 +179,43 @@ pub async fn create_opportunity(
     params(
         ("id" = i32, Path, description = "Opportunity ID")
     ),
-    request_body = OpportunityUpdate,
+    request_body = OpportunityFullUpdate,
     responses(
         (status = 200, description = "Opportunity updated (admin only)", body = OpportunityResponse),
         (status = 401, description = "Unauthorized", body = ErrorDetail),
         (status = 403, description = "Admin access required", body = ErrorDetail),
-        (status = 404, description = "Opportunity not found", body = ErrorDetail)
+        (status = 404, description = "Opportunity not found", body = ErrorDetail),
+        (status = 422, description = "Validation error on missing or empty fields", body = ErrorDetail)
     )
 )]
 pub async fn update_opportunity(
     State(state): State<AppState>,
     _admin: AdminUser,
     Path(id): Path<i32>,
-    Json(payload): Json<OpportunityUpdate>,
+    Json(payload): Json<OpportunityFullUpdate>,
 ) -> Result<Json<OpportunityResponse>, AppError> {
+    if payload.title.trim().is_empty()
+        || payload.description.trim().is_empty()
+        || payload.company.trim().is_empty()
+        || payload.location.trim().is_empty()
+    {
+        return Err(AppError::Validation(
+            "Title, description, company, and location are required and cannot be empty".to_string(),
+        ));
+    }
+
     let opp = Opportunity::find_by_id(id)
         .one(&state.db)
         .await?
         .ok_or_else(|| AppError::NotFound("Opportunity not found".to_string()))?;
 
     let mut active: opportunity::ActiveModel = opp.into();
-
-    if let Some(title) = payload.title {
-        active.title = Set(title);
-    }
-    if let Some(description) = payload.description {
-        active.description = Set(description);
-    }
-    if let Some(company) = payload.company {
-        active.company = Set(company);
-    }
-    if let Some(location) = payload.location {
-        active.location = Set(location);
-    }
-    if let Some(opp_type) = payload.type_ {
-        active.type_ = Set(opp_type);
-    }
-    if let Some(status) = payload.status {
-        active.status = Set(status);
-    }
+    active.title = Set(payload.title);
+    active.description = Set(payload.description);
+    active.company = Set(payload.company);
+    active.location = Set(payload.location);
+    active.type_ = Set(payload.type_);
+    active.status = Set(payload.status);
     active.updated_at = Set(chrono::Utc::now().into());
 
     let updated = active.update(&state.db).await?;

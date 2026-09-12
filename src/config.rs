@@ -35,6 +35,30 @@ pub struct Config {
     pub smtp_enabled: bool,
     #[serde(default = "default_app_base_url")]
     pub app_base_url: String,
+    #[serde(default = "default_db_max_connections")]
+    pub db_max_connections: u32,
+    #[serde(default = "default_db_min_connections")]
+    pub db_min_connections: u32,
+    #[serde(default = "default_db_connect_timeout_secs")]
+    pub db_connect_timeout_secs: u64,
+    #[serde(default = "default_db_idle_timeout_secs")]
+    pub db_idle_timeout_secs: u64,
+}
+
+fn default_db_max_connections() -> u32 {
+    10
+}
+
+fn default_db_min_connections() -> u32 {
+    2
+}
+
+fn default_db_connect_timeout_secs() -> u64 {
+    5
+}
+
+fn default_db_idle_timeout_secs() -> u64 {
+    600
 }
 
 fn default_database_url() -> String {

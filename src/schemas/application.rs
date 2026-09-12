@@ -27,3 +27,16 @@ pub struct ApplicationResponse {
     pub applied_at: DateTime<FixedOffset>,
     pub updated_at: DateTime<FixedOffset>,
 }
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ApplicationDetailResponse {
+    pub id: i32,
+    pub user_id: i32,
+    pub opportunity_id: i32,
+    pub opportunity_title: String,
+    pub company: String,
+    pub cover_letter: Option<String>,
+    pub status: ApplicationStatus,
+    pub applied_at: DateTime<FixedOffset>,
+    pub updated_at: DateTime<FixedOffset>,
+}

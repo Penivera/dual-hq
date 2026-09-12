@@ -350,35 +350,40 @@ pub fn send_application_status_update_email(
     });
 }
 
+#[derive(Debug, Clone)]
+pub struct OpportunityNotificationPayload {
+    pub title: String,
+    pub company: String,
+    pub location: String,
+    pub opp_type: String,
+    pub stipend: Option<String>,
+    pub opportunity_id: i32,
+}
+
 /// Sends a new internship opportunity notification to students rendered via Askama in a background task.
 pub fn send_new_opportunity_notification_email(
     config: Arc<Config>,
     student_email: String,
     student_name: String,
-    title: String,
-    company_name: String,
-    location: String,
-    opp_type: String,
-    stipend: Option<String>,
-    opportunity_id: i32,
+    opp: OpportunityNotificationPayload,
 ) {
     tokio::spawn(async move {
-        let view_url = format!("{}/opportunities/{}", config.app_base_url.trim_end_matches('/'), opportunity_id);
-        let stipend_text = stipend.unwrap_or_else(|| "Not specified".to_string());
+        let view_url = format!("{}/opportunities/{}", config.app_base_url.trim_end_matches('/'), opp.opportunity_id);
+        let stipend_text = opp.stipend.unwrap_or_else(|| "Not specified".to_string());
 
         let template = NewOpportunityTemplate {
             student_name: &student_name,
-            title: &title,
-            company_name: &company_name,
-            location: &location,
-            opp_type: &opp_type,
+            title: &opp.title,
+            company_name: &opp.company,
+            location: &opp.location,
+            opp_type: &opp.opp_type,
             stipend: &stipend_text,
             view_url: &view_url,
         };
 
         match template.render() {
             Ok(html_body) => {
-                let subject = format!("New Opportunity: {title} at {company_name}");
+                let subject = format!("New Opportunity: {} at {}", opp.title, opp.company);
                 if let Err(err) = send_email_smtp(&config, &student_email, Some(&student_name), &subject, &html_body).await {
                     tracing::error!("Failed to send new opportunity email to {}: {}", student_email, err);
                 }
