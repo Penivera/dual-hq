@@ -1,449 +1,258 @@
-# Internship Application System API (Rust / Axum + SeaORM)
+# Internship Application System
 
-A high-performance REST API for managing internship and job opportunities and applicant submissions, written in **Rust** using **Axum**, **SeaORM**, **PostgreSQL**, **Argon2**, and **JWT**.
+A REST API for managing internship postings and applicant submissions. It provides role-based access control for applicants and administrators, application status tracking with strict transition validation, asynchronous transactional emails for workflow events, and an administrative panel for system management.
 
----
+The deployed version is live at https://demo.peni.dev.
 
-## Tech Stack
+## Stack
 
-- **Framework**: [Axum](https://github.com/tokio-rs/axum) (0.8)
-- **Async Runtime**: [Tokio](https://tokio.rs/)
-- **ORM & Migrations**: [SeaORM](https://www.sea-ql.org/SeaORM/) + `sea-orm-migration` (PostgreSQL via SQLx)
-- **Admin Panel**: SeaORM Pro (`sea-orm-pro` configuration + interactive dashboard mounted at `/admin`)
-- **GraphQL**: [async-graphql](https://github.com/async-graphql/async-graphql) schema and Playground mounted at `/graphql` and `/playground`
-- **Interactive Documentation**: [utoipa](https://github.com/juhaku/utoipa) + `utoipa-swagger-ui` mounted at `/docs`
-- **Authentication**: JWT (`jsonwebtoken`) with custom Axum extractor & Role-Based Access Control (RBAC)
-- **Password Hashing**: `argon2` (Argon2id, V0x13, m_cost: 19456, t_cost: 2, p_cost: 1)
-- **Email Notifications**: [lettre](https://github.com/lettre/lettre) + [askama](https://github.com/rinja-rs/askama) HTML templates (non-blocking async background delivery via `tokio::spawn`)
-- **Resilience & Compression**: [tower-http](https://github.com/tower-rs/tower-http) Gzip & Brotli compression + 30-second request timeout
-- **Error Handling**: `thiserror` with consistent JSON shape: `{ "detail": "..." }`
-- **Configuration**: `dotenvy` + `config` from `.env`
+- Framework: Axum 0.8 on Tokio
+- ORM: SeaORM with sea-orm-migration (PostgreSQL)
+- Database: PostgreSQL
+- Auth: JWT (HMAC-SHA256) with Argon2id password hashing
+- Mail: Lettre with Askama HTML templates (Brevo SMTP)
+- Docs: OpenAPI 3.0 / Swagger UI via Utoipa
 
----
-
-## Project Structure
-
-```
-internship-api/
-├── src/
-│   ├── main.rs               # App entry point, tracing, compression & timeout layers, router assembly
-│   ├── lib.rs                # Library interface exposing modules
-│   ├── config.rs             # Environment configuration (dotenvy + config)
-│   ├── db.rs                 # SeaORM connection pool & AppState
-│   ├── email.rs              # SMTP email dispatcher with askama templates & background tokio tasks
-│   ├── errors.rs             # AppError enum with IntoResponse { "detail": "..." }
-│   ├── graphql.rs            # async-graphql schema, queries, and mutations
-│   ├── entities/             # SeaORM entities mirroring models
-│   │   ├── mod.rs
-│   │   ├── user.rs           # User entity & UserRole enum (applicant/admin)
-│   │   ├── opportunity.rs    # Opportunity entity, OpportunityType & Status
-│   │   └── application.rs    # Application entity & ApplicationStatus
-│   ├── migration/            # SeaORM migrations (table creation, indexes, foreign keys, constraints)
-│   │   ├── mod.rs            # MigratorTrait implementation
-│   │   ├── m20240101_000001_create_tables.rs
-│   │   ├── m20240101_000002_add_opportunity_indexes.rs
-│   │   └── m20240101_000003_enforce_constraints.rs
-│   ├── routes/               # Axum route definitions & OpenAPI spec
-│   │   ├── mod.rs            # Router nesting & ApiDoc OpenAPI definition
-│   │   ├── auth.rs           # /auth routes
-│   │   ├── opportunities.rs  # /opportunities routes
-│   │   └── applications.rs   # /applications routes
-│   ├── handlers/             # Business logic handlers
-│   │   ├── mod.rs
-│   │   ├── auth.rs           # Register, login, password hash/verify, JWT
-│   │   ├── opportunities.rs  # Paginated queries & CRUD with admin protection
-│   │   └── applications.rs   # Apply, status transitions, single-query join & withdrawal logic
-│   ├── schemas/              # Serde & Utoipa request/response models
-│   │   ├── mod.rs
-│   │   ├── auth.rs           # UserCreate, UserResponse, LoginRequest, Token
-│   │   ├── opportunity.rs    # OpportunityCreate, OpportunityFullUpdate, Response, PaginationQuery
-│   │   └── application.rs    # ApplicationCreate, StatusUpdate, ApplicationDetailResponse
-│   ├── middleware/
-│   │   ├── mod.rs
-│   │   └── auth.rs           # AuthenticatedUser, AdminUser & ApplicantUser extractors
-│   └── admin.rs              # SeaORM Pro admin setup & dashboard UI
-├── templates/                # Askama HTML email templates
-│   ├── welcome.html
-│   ├── new_opportunity.html
-│   ├── application_submitted.html
-│   └── application_status.html
-├── pro_admin/                # SeaORM Pro TOML configuration directory
-│   ├── config.toml           # Site branding, theme, and navigation
-│   ├── dashboard.toml        # Dashboard statistics cards and layout
-│   └── raw_tables/           # Table schemas for users, opportunities, applications
-│       ├── users.toml
-│       ├── opportunities.toml
-│       └── applications.toml
-├── assets/
-│   └── admin/                # Official SeaORM Pro React/Ant Design Pro SPA assets
-├── tests/
-│   ├── api_tests.rs          # API integration tests
-│   └── email_tests.rs        # Email template rendering & SMTP graceful degradation tests
-├── Cargo.toml                # Pinned dependencies with feature flags
-├── .env.example
-└── README.md
-```
-
----
-
-## Quick Start
-
-### 1. Prerequisites
-
-- **Rust toolchain** (1.80+): `rustc --version`
-- **PostgreSQL**: running locally or via Docker
+## Getting Started Locally
 
 ```bash
-# Create the database in PostgreSQL
-createdb internship_db
-# Or using psql:
-# psql -c "CREATE DATABASE internship_db;"
-```
-
-### 2. Configure Environment
-
-Copy `.env.example` to `.env` and set your credentials:
-
-```bash
+git clone https://github.com/Penivera/dual-hq.git
+cd dual-hq
 cp .env.example .env
-```
-
-Default variables in `.env`:
-```env
-# PostgreSQL database connection string
-DATABASE_URL=postgresql://postgres:password@localhost:5432/internship_db
-
-# Database Connection Pool Configuration
-DB_MAX_CONNECTIONS=10
-DB_MIN_CONNECTIONS=2
-DB_CONNECT_TIMEOUT_SECS=5
-DB_IDLE_TIMEOUT_SECS=600
-
-# JWT configuration
-JWT_SECRET=super-secret-jwt-key-replace-in-production
-JWT_EXPIRY_HOURS=24
-
-# Server network settings
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8010
-APP_BASE_URL=http://localhost:8010
-
-# Initial Administrator Seed Settings
-ADMIN_EMAIL=admin@internship.local
-ADMIN_PASSWORD=admin
-ADMIN_NAME="Admin User"
-
-# SMTP Mailing Configuration (Brevo / Sendinblue)
-SMTP_HOST=smtp-relay.brevo.com
-SMTP_PORT=587
-SMTP_USER=your-smtp-login-here
-SMTP_PASSWORD=your-smtp-key-here
-SMTP_FROM_EMAIL=noreply@yourdomain.com
-SMTP_FROM_NAME="Peni Demo"
-SMTP_ENABLED=true
-```
-
-### 3. Run the Application
-
-The database migrations run **automatically** on application startup.
-
-```bash
+createdb internship_db
 cargo run
 ```
 
-The server will start listening at `http://localhost:8010`.
+Migrations execute automatically on startup. The server listens on `http://0.0.0.0:8010`.
 
-- **Swagger UI**: [http://localhost:8010/docs](http://localhost:8010/docs)
-- **OpenAPI JSON Spec**: [http://localhost:8010/api-docs/openapi.json](http://localhost:8010/api-docs/openapi.json)
-- **GraphQL Playground**: [http://localhost:8010/playground](http://localhost:8010/playground)
-- **Admin Panel**: [http://localhost:8010/admin](http://localhost:8010/admin)
-- **Admin Config JSON**: [http://localhost:8010/admin/config](http://localhost:8010/admin/config)
-
-### 4. Running Tests
+To run the test suite:
 
 ```bash
 cargo test
 ```
 
----
+## Environment Variables
+
+| Variable | Description | Status | Default |
+| --- | --- | --- | --- |
+| DATABASE_URL | PostgreSQL connection string | Required | postgresql://postgres:password@localhost:5432/internship_db |
+| DB_MAX_CONNECTIONS | Maximum connection pool size | Optional | 10 |
+| DB_MIN_CONNECTIONS | Minimum idle connections in pool | Optional | 2 |
+| DB_CONNECT_TIMEOUT_SECS | Database connection timeout in seconds | Optional | 5 |
+| DB_IDLE_TIMEOUT_SECS | Idle connection timeout in seconds | Optional | 600 |
+| JWT_SECRET | Secret key for signing and verifying tokens | Optional | super-secret-jwt-key-replace-in-production |
+| JWT_EXPIRY_HOURS | Token lifetime in hours | Optional | 24 |
+| SERVER_HOST | Host interface to bind | Optional | 0.0.0.0 |
+| SERVER_PORT | TCP port to listen on | Optional | 8010 |
+| APP_BASE_URL | Base application URL used in email template links | Optional | http://localhost:8010 |
+| ADMIN_EMAIL | Email of the pre-seeded admin user | Optional | admin@internship.local |
+| ADMIN_PASSWORD | Password of the pre-seeded admin user | Optional | admin |
+| ADMIN_NAME | Display name of the pre-seeded admin user | Optional | Admin User |
+| SMTP_HOST | SMTP server hostname | Optional | smtp-relay.brevo.com |
+| SMTP_PORT | SMTP port (587 for STARTTLS, 465 for TLS) | Optional | 587 |
+| SMTP_USER | SMTP login username | Optional | (empty) |
+| SMTP_PASSWORD | SMTP password or Brevo API/SMTP key | Optional | (empty) |
+| SMTP_FROM_EMAIL | Outgoing sender email address | Optional | (empty) |
+| SMTP_FROM_NAME | Outgoing sender display name | Optional | Peni Demo |
+| SMTP_ENABLED | Master switch for outbound transactional mail | Optional | false |
 
 ## Creating an Admin User
 
-You can create an admin user in three ways:
+The server checks for an admin user on startup. If no admin exists, it creates one using `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME` from `.env`.
 
-### Option A: Automatic Seeding on Startup
-Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME` in your `.env`. When the application starts up and runs migrations, it automatically ensures this admin user exists.
+To create or promote an admin explicitly via CLI:
 
-### Option B: Using the Admin Panel GUI
-1. Register a standard user via `POST /auth/register`.
-2. Open [http://localhost:8010/admin](http://localhost:8010/admin) in your browser.
-3. Click on **Users** in the sidebar, find the user, and click **Promote to Admin**.
-
-### Option C: Directly via SQL
-```sql
-UPDATE users SET role = 'admin' WHERE email = 'admin@internship.local';
+```bash
+cargo run --bin seed -- admin@example.com SecretPass123 "Platform Admin"
 ```
 
----
+Or update an existing user directly in PostgreSQL:
 
-## Example API Requests
+```sql
+UPDATE users SET role = 'admin' WHERE email = 'john.doe@example.com';
+```
 
-### 1. Register a New User
+## API Overview
+
+| Method | Path | Auth | Role | Description |
+| --- | --- | --- | --- | --- |
+| POST | /auth/register | No | Public | Register a new user account |
+| POST | /auth/login | No | Public | Authenticate user and receive JWT bearer token |
+| GET | /auth/verify | No | Public | Verify account email via query token |
+| POST | /auth/verify | No | Public | Verify account email via JSON payload |
+| POST | /auth/resend-verification | No | Public | Resend email verification link |
+| GET | /opportunities | Yes | Any | List open opportunities with pagination (page, per_page) |
+| POST | /opportunities | Yes | Admin | Create a new opportunity (broadcasts email to applicants) |
+| GET | /opportunities/{id} | Yes | Any | Fetch single opportunity by ID |
+| PUT | /opportunities/{id} | Yes | Admin | Full update of an opportunity |
+| DELETE | /opportunities/{id} | Yes | Admin | Delete an opportunity |
+| POST | /applications | Yes | Applicant | Apply to an open opportunity |
+| GET | /applications | Yes | Admin | List all applications across the platform |
+| GET | /applications/me | Yes | Applicant | List current user applications with opportunity details joined |
+| GET | /applications/{id} | Yes | Owner/Admin | Fetch application details |
+| PATCH | /applications/{id}/status | Yes | Owner/Admin | Transition application status |
+| DELETE | /applications/{id} | Yes | Applicant | Delete a pending application |
+| GET | /health | No | Public | Service health and database connectivity check |
+
+Interactive Swagger documentation is available at `/docs` and OpenAPI JSON at `/api-docs/openapi.json`.
+The SeaORM Pro admin dashboard is available at `/admin`.
+GraphQL schema and playground are available at `/graphql` and `/playground`.
+
+## Example Requests
+
+### Register
 
 ```bash
 curl -s -X POST http://localhost:8010/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "full_name": "Jane Doe",
-    "email": "jane@example.com",
-    "password": "secretPassword123"
+    "full_name": "John Doe",
+    "email": "john.doe@example.com",
+    "password": "Password123!"
   }'
 ```
 
-**Response (201 Created):**
+Response:
 ```json
 {
-  "id": 1,
-  "full_name": "Jane Doe",
-  "email": "jane@example.com",
+  "id": 2,
+  "full_name": "John Doe",
+  "email": "john.doe@example.com",
   "role": "applicant",
-  "created_at": "2026-09-11T14:00:00+00:00"
+  "created_at": "2026-09-12T01:30:00Z"
 }
 ```
-*(Asynchronously dispatches a welcome email via background Tokio task if SMTP is configured).*
 
----
-
-### 2. Login (Obtain JWT Access Token)
-
-Supports both JSON and standard OAuth2 form encoding (`application/x-www-form-urlencoded`):
+### Login
 
 ```bash
 curl -s -X POST http://localhost:8010/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "jane@example.com",
-    "password": "secretPassword123"
+    "email": "john.doe@example.com",
+    "password": "Password123!"
   }'
 ```
 
-Or using form data:
-```bash
-curl -s -X POST http://localhost:8010/auth/login \
-  -d "username=jane@example.com&password=secretPassword123"
-```
-
-**Response (200 OK):**
+Response:
 ```json
 {
-  "access_token": "eyJhbGciOi...",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwicm9sZSI6ImFwcGxpY2FudCIsImV4cCI6MTc4OTEwMDAwMH0.K3-4-8b_G8u7eG",
   "token_type": "bearer"
 }
 ```
 
-Save your token for subsequent requests:
-```bash
-export TOKEN="<paste-your-access-token-here>"
-```
-
----
-
-### 3. Opportunities
-
-#### A. Create an Opportunity (Admin Only)
-Requires user to have `admin` role. Returns `422 Unprocessable Entity` if any required fields are empty or whitespace.
+### Create an Opportunity (Admin)
 
 ```bash
 curl -s -X POST http://localhost:8010/opportunities \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIiwiZXhwIjoxNzg5MTAwMDAwfQ.abc123" \
   -H "Content-Type: application/json" \
   -d '{
-    "title": "Backend Engineering Intern",
-    "description": "Build high-throughput async microservices with Rust & PostgreSQL",
-    "company": "Acme Corp",
+    "title": "Systems Software Engineering Intern",
+    "description": "Design and build high-throughput backend services using Rust and PostgreSQL.",
+    "company": "DualHQ",
     "location": "Remote",
     "type": "internship"
   }'
 ```
 
-**Response (201 Created):**
+Response:
 ```json
 {
   "id": 1,
-  "title": "Backend Engineering Intern",
-  "description": "Build high-throughput async microservices with Rust & PostgreSQL",
-  "company": "Acme Corp",
+  "title": "Systems Software Engineering Intern",
+  "description": "Design and build high-throughput backend services using Rust and PostgreSQL.",
+  "company": "DualHQ",
   "location": "Remote",
   "type": "internship",
   "status": "open",
-  "created_at": "2026-09-11T14:05:00+00:00",
-  "updated_at": "2026-09-11T14:05:00+00:00"
+  "created_at": "2026-09-12T01:32:00Z",
+  "updated_at": "2026-09-12T01:32:00Z"
 }
 ```
-*(Asynchronously dispatches new opportunity notification emails to registered applicants).*
 
-#### B. List Open Opportunities (Paginated)
-Supports `page` (default 1) and `per_page` (default 20, max 100), as well as backwards-compatible `skip` and `limit`. Only returns `open` opportunities.
-
-```bash
-curl -s -X GET "http://localhost:8010/opportunities?page=1&per_page=20" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**Response (200 OK):**
-```json
-[
-  {
-    "id": 1,
-    "title": "Backend Engineering Intern",
-    "description": "Build high-throughput async microservices with Rust & PostgreSQL",
-    "company": "Acme Corp",
-    "location": "Remote",
-    "type": "internship",
-    "status": "open",
-    "created_at": "2026-09-11T14:05:00+00:00",
-    "updated_at": "2026-09-11T14:05:00+00:00"
-  }
-]
-```
-
-#### C. Get Opportunity by ID
-Returns `200 OK` or `404 Not Found` (`{ "detail": "Opportunity not found" }`).
-
-```bash
-curl -s -X GET http://localhost:8010/opportunities/1 \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-#### D. Full Update Opportunity (Admin Only)
-Performs a full update. Returns `200 OK` or `422 Unprocessable Entity` if any required fields are empty or whitespace.
-
-```bash
-curl -s -X PUT http://localhost:8010/opportunities/1 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Senior Backend Engineering Intern",
-    "description": "Lead async microservices with Rust, SeaORM & Axum",
-    "company": "Acme Corp",
-    "location": "Remote (Global)",
-    "type": "internship",
-    "status": "open"
-  }'
-```
-
-#### E. Delete Opportunity (Admin Only)
-```bash
-curl -s -i -X DELETE http://localhost:8010/opportunities/1 \
-  -H "Authorization: Bearer $TOKEN"
-```
-**Response (204 No Content)**
-
----
-
-### 4. Applications
-
-#### A. Apply to an Opportunity (Applicant Only)
-Enforces:
-- Only users with `applicant` role can apply (`403 Forbidden` for admin)
-- Cannot apply to closed opportunities (`400 Bad Request`)
-- Cannot apply to the same opportunity twice (`409 Conflict`)
-- Cover letter cannot be empty (`422 Unprocessable Entity`)
+### Apply to an Opportunity
 
 ```bash
 curl -s -X POST http://localhost:8010/applications \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwicm9sZSI6ImFwcGxpY2FudCIsImV4cCI6MTc4OTEwMDAwMH0.K3-4-8b_G8u7eG" \
   -H "Content-Type: application/json" \
   -d '{
     "opportunity_id": 1,
-    "cover_letter": "I have hands-on experience with Rust, Axum, and SQL databases."
+    "cover_letter": "I have hands-on experience building asynchronous backend APIs in Rust and working with relational databases."
   }'
 ```
 
-**Response (201 Created):**
+Response:
 ```json
 {
   "id": 1,
-  "user_id": 1,
+  "user_id": 2,
   "opportunity_id": 1,
-  "cover_letter": "I have hands-on experience with Rust, Axum, and SQL databases.",
+  "cover_letter": "I have hands-on experience building asynchronous backend APIs in Rust and working with relational databases.",
   "status": "pending",
-  "applied_at": "2026-09-11T14:10:00+00:00",
-  "updated_at": "2026-09-11T14:10:00+00:00"
+  "applied_at": "2026-09-12T01:35:00Z",
+  "updated_at": "2026-09-12T01:35:00Z"
 }
 ```
-*(Asynchronously dispatches application submission confirmation email to applicant).*
 
-#### B. View My Applications
-Fetches all applications submitted by the authenticated user joined with opportunity title and company name in a single SQL query (`find_also_related`).
+### Check Applications
 
 ```bash
 curl -s -X GET http://localhost:8010/applications/me \
-  -H "Authorization: Bearer $TOKEN"
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwicm9sZSI6ImFwcGxpY2FudCIsImV4cCI6MTc4OTEwMDAwMH0.K3-4-8b_G8u7eG"
 ```
 
-**Response (200 OK):**
+Response:
 ```json
 [
   {
     "id": 1,
-    "user_id": 1,
+    "user_id": 2,
     "opportunity_id": 1,
-    "opportunity_title": "Senior Backend Engineering Intern",
-    "company": "Acme Corp",
-    "cover_letter": "I have hands-on experience with Rust, Axum, and SQL databases.",
+    "opportunity_title": "Systems Software Engineering Intern",
+    "company": "DualHQ",
+    "cover_letter": "I have hands-on experience building asynchronous backend APIs in Rust and working with relational databases.",
     "status": "pending",
-    "applied_at": "2026-09-11T14:10:00+00:00",
-    "updated_at": "2026-09-11T14:10:00+00:00"
+    "applied_at": "2026-09-12T01:35:00Z",
+    "updated_at": "2026-09-12T01:35:00Z"
   }
 ]
 ```
 
-#### C. Get Application by ID
-Only accessible by the application owner or an administrator. Returns `403 Forbidden` otherwise, or `404 Not Found`.
+### Update Application Status
 
 ```bash
-curl -s -X GET http://localhost:8010/applications/1 \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-#### D. Update Application Status
-Enforces strict state transitions:
-- **Admin**: Can transition `pending` applications to `accepted` or `rejected`. Invalid transitions return `422 Unprocessable Entity`. Asynchronously sends a status update email to the applicant.
-- **Applicant**: Can transition `pending` applications to `withdrawn`. Non-pending applications or invalid status targets return `422 Unprocessable Entity`.
-
-```bash
-# Admin accepting an application:
 curl -s -X PATCH http://localhost:8010/applications/1/status \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIiwiZXhwIjoxNzg5MTAwMDAwfQ.abc123" \
   -H "Content-Type: application/json" \
   -d '{
     "status": "accepted"
   }'
 ```
 
-```bash
-# Applicant withdrawing their pending application:
-curl -s -X PATCH http://localhost:8010/applications/1/status \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "status": "withdrawn"
-  }'
+Response:
+```json
+{
+  "id": 1,
+  "user_id": 2,
+  "opportunity_id": 1,
+  "cover_letter": "I have hands-on experience building asynchronous backend APIs in Rust and working with relational databases.",
+  "status": "accepted",
+  "applied_at": "2026-09-12T01:35:00Z",
+  "updated_at": "2026-09-12T01:40:00Z"
+}
 ```
 
-#### E. Delete Application (Applicant Only)
-Applicants can delete their own application only while its status is still `pending`. If the application is already accepted, rejected, or withdrawn, it returns `422 Unprocessable Entity`.
+## Deployment
 
-```bash
-curl -s -i -X DELETE http://localhost:8010/applications/1 \
-  -H "Authorization: Bearer $TOKEN"
-```
+The application is deployed at https://demo.peni.dev.
 
-**Response (204 No Content)**
+- Swagger UI is live at https://demo.peni.dev/docs
+- SeaORM Pro admin panel is live at https://demo.peni.dev/admin
+- Health check is accessible at https://demo.peni.dev/health
 
----
+## Mail
 
-## License
-
-MIT
+Transactional email is handled via Brevo over SMTP. Emails are sent for five triggers: email verification requests, welcome confirmation on verification, opportunity creation notifications sent to students, application submission confirmations, and application status updates (accepted/rejected). Delivery runs in detached Tokio tasks (`tokio::spawn`), so network latency to the SMTP server does not affect HTTP response times. If `BREVO_API_KEY` or SMTP credentials (`SMTP_USER`, `SMTP_PASSWORD`) are not provided, or `SMTP_ENABLED=false`, the email service logs an info trace and safely skips delivery without failing the HTTP request.
