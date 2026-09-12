@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use sea_orm::{Database, DatabaseConnection, DbErr};
+use std::time::Duration;
+use sea_orm::{ConnectOptions, Database, DatabaseConnection, DbErr};
 use sea_orm_migration::MigratorTrait;
 
 use crate::config::Config;
@@ -12,8 +13,16 @@ pub struct AppState {
 }
 
 pub async fn init_db(config: &Config) -> Result<DatabaseConnection, DbErr> {
-    let db = Database::connect(&config.database_url).await?;
-    tracing::info!("Connected to database: {}", config.database_url);
+    let mut opt = ConnectOptions::new(&config.database_url);
+    opt.max_connections(25)
+        .min_connections(2)
+        .connect_timeout(Duration::from_secs(15))
+        .acquire_timeout(Duration::from_secs(15))
+        .idle_timeout(Duration::from_secs(300))
+        .max_lifetime(Duration::from_secs(1800));
+
+    let db = Database::connect(opt).await?;
+    tracing::info!("Connected to database successfully");
 
     // Run migrations on startup
     Migrator::up(&db, None).await?;
