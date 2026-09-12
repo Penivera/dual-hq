@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Your Email - Internship Portal{% endblock %}
+
+{% block content %}
+<h2>Welcome to the Internship Portal!</h2>
+<p>Hi {{ user_name }},</p>
+<p>Thank you for creating an account with us. To verify your email address and activate your account, please click the button below:</p>
+
+<div style="text-align: center;">
+    <a href="{{ verify_url }}" class="button">Verify Email Address</a>
+</div>
+
+<p>Or paste this link into your browser:</p>
+<p style="word-break: break-all; color: #1890ff;"><a href="{{ verify_url }}">{{ verify_url }}</a></p>
+
+<p>Your verification token:</p>
+<div class="token-box">{{ verification_token }}</div>
+
+<p style="color: #64748b; font-size: 13px; margin-top: 24px;">
+    If you did not register for an account on the Internship Portal, you can safely ignore this email.
+</p>
+{% endblock %}

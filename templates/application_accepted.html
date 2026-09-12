@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Congratulations! Application Accepted - {{ opportunity_title }}{% endblock %}
+
+{% block content %}
+<div style="text-align: center; margin-bottom: 20px;">
+    <div style="display: inline-block; background-color: #f6ffed; border: 2px solid #b7eb8f; border-radius: 50%; width: 56px; height: 56px; line-height: 56px; font-size: 28px;">
+        🎉
+    </div>
+</div>
+
+<h2 style="text-align: center; color: #52c41a; margin-bottom: 8px;">Congratulations! You're Accepted!</h2>
+<p>Hi {{ applicant_name }},</p>
+<p>We are delighted to inform you that your application for <strong>{{ opportunity_title }}</strong> at <strong>{{ company_name }}</strong> has been officially <strong>ACCEPTED</strong>!</p>
+
+<div class="card" style="border-left: 4px solid #52c41a; background-color: #f6ffed;">
+    <h3 style="margin-top: 0; color: #237804;">Application Details</h3>
+    <p style="margin: 4px 0;"><strong>Role:</strong> {{ opportunity_title }}</p>
+    <p style="margin: 4px 0;"><strong>Company:</strong> {{ company_name }}</p>
+    <p style="margin: 4px 0;"><strong>Status:</strong> <span class="badge badge-success">Accepted</span></p>
+</div>
+
+<div class="card">
+    <h3 style="margin-top: 0; color: #1e293b;">Next Steps:</h3>
+    <p style="margin: 4px 0;">{{ next_steps }}</p>
+</div>
+
+<div style="text-align: center;">
+    <a href="{{ dashboard_url }}" class="button button-success">View Application in Dashboard</a>
+</div>
+
+<p>Congratulations once again on your achievement! The team will be in touch with onboarding instructions soon.</p>
+{% endblock %}

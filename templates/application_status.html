@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Application Update: {{ opportunity_title }}{% endblock %}
+
+{% block content %}
+<h2>Application Status Update 📌</h2>
+<p>Hi {{ applicant_name }},</p>
+<p>There is an update on your application for <strong>{{ opportunity_title }}</strong> at <strong>{{ company_name }}</strong>:</p>
+
+<div class="card">
+    <p style="margin: 4px 0;"><strong>Role:</strong> {{ opportunity_title }}</p>
+    <p style="margin: 4px 0;"><strong>Company:</strong> {{ company_name }}</p>
+    <p style="margin: 4px 0;"><strong>New Status:</strong> <span class="badge" style="background-color: {{ status_bg }}; color: {{ status_fg }};">{{ new_status }}</span></p>
+</div>
+
+<p>Please visit your portal dashboard to check any additional notes or instructions from the recruiter.</p>
+
+<div style="text-align: center;">
+    <a href="{{ dashboard_url }}" class="button">Go to Dashboard</a>
+</div>
+{% endblock %}

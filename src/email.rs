@@ -1,9 +1,76 @@
 use std::sync::Arc;
+use askama::Template;
 use lettre::message::{Mailbox, Message, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 
 use crate::config::Config;
+
+// ============================================================================
+// Askama Email Templates
+// ============================================================================
+
+#[derive(Template)]
+#[template(path = "verification.html")]
+pub struct VerificationTemplate<'a> {
+    pub user_name: &'a str,
+    pub verify_url: &'a str,
+    pub verification_token: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "welcome.html")]
+pub struct WelcomeTemplate<'a> {
+    pub user_name: &'a str,
+    pub dashboard_url: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "new_opportunity.html")]
+pub struct NewOpportunityTemplate<'a> {
+    pub student_name: &'a str,
+    pub title: &'a str,
+    pub company_name: &'a str,
+    pub location: &'a str,
+    pub opp_type: &'a str,
+    pub stipend: &'a str,
+    pub view_url: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "application_accepted.html")]
+pub struct ApplicationAcceptedTemplate<'a> {
+    pub applicant_name: &'a str,
+    pub opportunity_title: &'a str,
+    pub company_name: &'a str,
+    pub next_steps: &'a str,
+    pub dashboard_url: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "application_submitted.html")]
+pub struct ApplicationSubmittedTemplate<'a> {
+    pub applicant_name: &'a str,
+    pub opportunity_title: &'a str,
+    pub company_name: &'a str,
+    pub dashboard_url: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "application_status.html")]
+pub struct ApplicationStatusTemplate<'a> {
+    pub applicant_name: &'a str,
+    pub opportunity_title: &'a str,
+    pub company_name: &'a str,
+    pub new_status: &'a str,
+    pub status_bg: &'a str,
+    pub status_fg: &'a str,
+    pub dashboard_url: &'a str,
+}
+
+// ============================================================================
+// Core SMTP Sending Logic
+// ============================================================================
 
 /// Core SMTP sending function with support for direct TLS (port 465) and STARTTLS (port 587).
 pub async fn send_email_smtp(
@@ -72,7 +139,7 @@ pub async fn send_email_smtp(
     Ok(())
 }
 
-/// Dispatches an email in the background without blocking the HTTP request handler.
+/// Spawns an asynchronous tokio task to send an email without blocking the route handler.
 pub fn spawn_email(
     config: Arc<Config>,
     to_email: String,
@@ -95,54 +162,110 @@ pub fn spawn_email(
     });
 }
 
-/// Sends an account verification email to a newly registered student or user.
+// ============================================================================
+// Public Email Dispatchers (Non-blocking Tokio tasks)
+// ============================================================================
+
+/// Sends an account verification email rendered via Askama in a background task.
 pub fn send_verification_email(
     config: Arc<Config>,
     to_email: String,
     to_name: String,
     verification_token: String,
 ) {
-    let verify_url = format!(
-        "{}/api/auth/verify?token={}",
-        config.app_base_url.trim_end_matches('/'),
-        verification_token
-    );
+    tokio::spawn(async move {
+        let verify_url = format!(
+            "{}/api/auth/verify?token={}",
+            config.app_base_url.trim_end_matches('/'),
+            verification_token
+        );
 
-    let subject = "Verify your email address - Internship Portal".to_string();
-    let html_body = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 8px; }}
-        .button {{ display: inline-block; padding: 12px 24px; background-color: #0070f3; color: #ffffff !important; text-decoration: none; border-radius: 5px; font-weight: 600; margin: 16px 0; }}
-        .token-box {{ background-color: #f5f5f5; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 16px; margin: 16px 0; word-break: break-all; }}
-        .footer {{ margin-top: 24px; font-size: 12px; color: #666; border-top: 1px solid #eaeaea; padding-top: 12px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>Welcome to the Internship Application System!</h2>
-        <p>Hi {to_name},</p>
-        <p>Thank you for registering. Please verify your email address to activate your account and apply for internships.</p>
-        <p><a href="{verify_url}" class="button">Verify Email Address</a></p>
-        <p>Or click this link directly: <a href="{verify_url}">{verify_url}</a></p>
-        <p>Your verification token:</p>
-        <div class="token-box">{verification_token}</div>
-        <div class="footer">
-            <p>If you did not create an account, you can safely ignore this email.</p>
-        </div>
-    </div>
-</body>
-</html>"#
-    );
+        let template = VerificationTemplate {
+            user_name: &to_name,
+            verify_url: &verify_url,
+            verification_token: &verification_token,
+        };
 
-    spawn_email(config, to_email, Some(to_name), subject, html_body);
+        match template.render() {
+            Ok(html_body) => {
+                let subject = "Verify your email address - Internship Portal".to_string();
+                if let Err(err) = send_email_smtp(&config, &to_email, Some(&to_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send verification email to {}: {}", to_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render verification email template: {}", err);
+            }
+        }
+    });
 }
 
-/// Sends an application submission confirmation to the applicant.
+/// Sends a welcome email upon successful verification rendered via Askama in a background task.
+pub fn send_welcome_email(
+    config: Arc<Config>,
+    to_email: String,
+    to_name: String,
+) {
+    tokio::spawn(async move {
+        let dashboard_url = format!("{}/dashboard", config.app_base_url.trim_end_matches('/'));
+
+        let template = WelcomeTemplate {
+            user_name: &to_name,
+            dashboard_url: &dashboard_url,
+        };
+
+        match template.render() {
+            Ok(html_body) => {
+                let subject = "Welcome to Internship Portal! Account Verified 🎉".to_string();
+                if let Err(err) = send_email_smtp(&config, &to_email, Some(&to_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send welcome email to {}: {}", to_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render welcome email template: {}", err);
+            }
+        }
+    });
+}
+
+/// Sends an application accepted congratulatory email rendered via Askama in a background task.
+pub fn send_application_accepted_email(
+    config: Arc<Config>,
+    applicant_email: String,
+    applicant_name: String,
+    opportunity_title: String,
+    company_name: String,
+    next_steps: Option<String>,
+) {
+    tokio::spawn(async move {
+        let dashboard_url = format!("{}/dashboard/applications", config.app_base_url.trim_end_matches('/'));
+        let steps = next_steps.unwrap_or_else(|| {
+            "Please log in to your dashboard to review onboarding materials, schedule your orientation, or contact the hiring manager.".to_string()
+        });
+
+        let template = ApplicationAcceptedTemplate {
+            applicant_name: &applicant_name,
+            opportunity_title: &opportunity_title,
+            company_name: &company_name,
+            next_steps: &steps,
+            dashboard_url: &dashboard_url,
+        };
+
+        match template.render() {
+            Ok(html_body) => {
+                let subject = format!("Congratulations! Application Accepted for {opportunity_title} at {company_name} 🎉");
+                if let Err(err) = send_email_smtp(&config, &applicant_email, Some(&applicant_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send application accepted email to {}: {}", applicant_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render application accepted email template: {}", err);
+            }
+        }
+    });
+}
+
+/// Sends an application submission confirmation email rendered via Askama in a background task.
 pub fn send_application_submitted_email(
     config: Arc<Config>,
     applicant_email: String,
@@ -150,38 +273,31 @@ pub fn send_application_submitted_email(
     opportunity_title: String,
     company_name: String,
 ) {
-    let subject = format!("Application Submitted: {opportunity_title} at {company_name}");
-    let html_body = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 8px; }}
-        .badge {{ display: inline-block; padding: 4px 10px; background-color: #e6f7ff; color: #1890ff; border-radius: 4px; font-weight: 500; }}
-        .footer {{ margin-top: 24px; font-size: 12px; color: #666; border-top: 1px solid #eaeaea; padding-top: 12px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>Application Received!</h2>
-        <p>Hi {applicant_name},</p>
-        <p>Your application for <strong>{opportunity_title}</strong> at <strong>{company_name}</strong> has been successfully received.</p>
-        <p>Status: <span class="badge">Pending Review</span></p>
-        <p>The hiring team will review your submission and you will be notified of any updates.</p>
-        <div class="footer">
-            <p>Internship Application Portal &copy; 2026</p>
-        </div>
-    </div>
-</body>
-</html>"#
-    );
+    tokio::spawn(async move {
+        let dashboard_url = format!("{}/dashboard/applications", config.app_base_url.trim_end_matches('/'));
 
-    spawn_email(config, applicant_email, Some(applicant_name), subject, html_body);
+        let template = ApplicationSubmittedTemplate {
+            applicant_name: &applicant_name,
+            opportunity_title: &opportunity_title,
+            company_name: &company_name,
+            dashboard_url: &dashboard_url,
+        };
+
+        match template.render() {
+            Ok(html_body) => {
+                let subject = format!("Application Submitted: {opportunity_title} at {company_name}");
+                if let Err(err) = send_email_smtp(&config, &applicant_email, Some(&applicant_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send application submitted email to {}: {}", applicant_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render application submitted email template: {}", err);
+            }
+        }
+    });
 }
 
-/// Sends an application status update notification to the applicant.
+/// Sends an application status update notification (delegates to accepted template if status is accepted).
 pub fn send_application_status_update_email(
     config: Arc<Config>,
     applicant_email: String,
@@ -190,45 +306,51 @@ pub fn send_application_status_update_email(
     company_name: String,
     new_status: String,
 ) {
-    let subject = format!("Application Update: {opportunity_title} ({new_status})");
-    let status_color = match new_status.to_lowercase().as_str() {
-        "accepted" => "#52c41a",
-        "rejected" => "#ff4d4f",
-        "under_review" | "reviewed" => "#faad14",
-        _ => "#1890ff",
-    };
+    if new_status.eq_ignore_ascii_case("accepted") {
+        send_application_accepted_email(
+            config,
+            applicant_email,
+            applicant_name,
+            opportunity_title,
+            company_name,
+            None,
+        );
+        return;
+    }
 
-    let html_body = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 8px; }}
-        .status-badge {{ display: inline-block; padding: 6px 14px; background-color: {status_color}; color: white; border-radius: 4px; font-weight: 600; font-size: 16px; margin: 12px 0; }}
-        .footer {{ margin-top: 24px; font-size: 12px; color: #666; border-top: 1px solid #eaeaea; padding-top: 12px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>Application Status Update</h2>
-        <p>Hi {applicant_name},</p>
-        <p>The status of your application for <strong>{opportunity_title}</strong> at <strong>{company_name}</strong> has been updated:</p>
-        <div><span class="status-badge">{new_status}</span></div>
-        <p>Please log in to your dashboard to review any further instructions.</p>
-        <div class="footer">
-            <p>Internship Application Portal &copy; 2026</p>
-        </div>
-    </div>
-</body>
-</html>"#
-    );
+    tokio::spawn(async move {
+        let dashboard_url = format!("{}/dashboard/applications", config.app_base_url.trim_end_matches('/'));
+        let (status_bg, status_fg) = match new_status.to_lowercase().as_str() {
+            "rejected" => ("#fff1f0", "#f5222d"),
+            "under_review" | "reviewed" => ("#fffbe6", "#d48806"),
+            _ => ("#e6f7ff", "#1890ff"),
+        };
 
-    spawn_email(config, applicant_email, Some(applicant_name), subject, html_body);
+        let template = ApplicationStatusTemplate {
+            applicant_name: &applicant_name,
+            opportunity_title: &opportunity_title,
+            company_name: &company_name,
+            new_status: &new_status,
+            status_bg,
+            status_fg,
+            dashboard_url: &dashboard_url,
+        };
+
+        match template.render() {
+            Ok(html_body) => {
+                let subject = format!("Application Update: {opportunity_title} ({new_status})");
+                if let Err(err) = send_email_smtp(&config, &applicant_email, Some(&applicant_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send application status email to {}: {}", applicant_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render application status email template: {}", err);
+            }
+        }
+    });
 }
 
-/// Sends a new internship opportunity notification to students.
+/// Sends a new internship opportunity notification to students rendered via Askama in a background task.
 pub fn send_new_opportunity_notification_email(
     config: Arc<Config>,
     student_email: String,
@@ -240,43 +362,30 @@ pub fn send_new_opportunity_notification_email(
     stipend: Option<String>,
     opportunity_id: i32,
 ) {
-    let view_url = format!("{}/opportunities/{}", config.app_base_url.trim_end_matches('/'), opportunity_id);
-    let subject = format!("New Opportunity: {title} at {company_name}");
-    let stipend_text = stipend.unwrap_or_else(|| "Not specified".to_string());
+    tokio::spawn(async move {
+        let view_url = format!("{}/opportunities/{}", config.app_base_url.trim_end_matches('/'), opportunity_id);
+        let stipend_text = stipend.unwrap_or_else(|| "Not specified".to_string());
 
-    let html_body = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #eaeaea; border-radius: 8px; }}
-        .card {{ background-color: #fafafa; border: 1px solid #eee; border-radius: 6px; padding: 16px; margin: 16px 0; }}
-        .button {{ display: inline-block; padding: 10px 20px; background-color: #0070f3; color: #ffffff !important; text-decoration: none; border-radius: 4px; font-weight: 600; margin-top: 12px; }}
-        .footer {{ margin-top: 24px; font-size: 12px; color: #666; border-top: 1px solid #eaeaea; padding-top: 12px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h2>New Opportunity Listed!</h2>
-        <p>Hi {student_name},</p>
-        <p>A new opportunity matching your profile has just been published on the portal:</p>
-        <div class="card">
-            <h3 style="margin-top: 0;">{title}</h3>
-            <p><strong>Company:</strong> {company_name}</p>
-            <p><strong>Location:</strong> {location}</p>
-            <p><strong>Type:</strong> {opp_type}</p>
-            <p><strong>Stipend:</strong> {stipend_text}</p>
-            <a href="{view_url}" class="button">View & Apply</a>
-        </div>
-        <div class="footer">
-            <p>You received this because you are registered as a student on the Internship Application Portal.</p>
-        </div>
-    </div>
-</body>
-</html>"#
-    );
+        let template = NewOpportunityTemplate {
+            student_name: &student_name,
+            title: &title,
+            company_name: &company_name,
+            location: &location,
+            opp_type: &opp_type,
+            stipend: &stipend_text,
+            view_url: &view_url,
+        };
 
-    spawn_email(config, student_email, Some(student_name), subject, html_body);
+        match template.render() {
+            Ok(html_body) => {
+                let subject = format!("New Opportunity: {title} at {company_name}");
+                if let Err(err) = send_email_smtp(&config, &student_email, Some(&student_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send new opportunity email to {}: {}", student_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render new opportunity email template: {}", err);
+            }
+        }
+    });
 }

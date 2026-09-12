@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Application Submitted: {{ opportunity_title }}{% endblock %}
+
+{% block content %}
+<h2>Application Received! 📝</h2>
+<p>Hi {{ applicant_name }},</p>
+<p>Your application for <strong>{{ opportunity_title }}</strong> at <strong>{{ company_name }}</strong> has been submitted successfully.</p>
+
+<div class="card">
+    <p style="margin: 4px 0;"><strong>Role:</strong> {{ opportunity_title }}</p>
+    <p style="margin: 4px 0;"><strong>Company:</strong> {{ company_name }}</p>
+    <p style="margin: 4px 0;"><strong>Status:</strong> <span class="badge" style="background-color: #e6f7ff; color: #1890ff;">Pending Review</span></p>
+</div>
+
+<p>The hiring team will review your qualifications and application materials. You can track your progress in your dashboard.</p>
+
+<div style="text-align: center;">
+    <a href="{{ dashboard_url }}" class="button">View Dashboard</a>
+</div>
+{% endblock %}

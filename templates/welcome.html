@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome to Internship Portal{% endblock %}
+
+{% block content %}
+<h2>Your Account is Verified! 🎉</h2>
+<p>Hi {{ user_name }},</p>
+<p>Congratulations! Your email address has been verified and your account is now active.</p>
+
+<div class="card">
+    <h3 style="margin-top: 0; color: #0f172a;">What you can do next:</h3>
+    <ul style="padding-left: 20px; margin-bottom: 0;">
+        <li>Explore curated internship and job opportunities</li>
+        <li>Submit applications directly to top companies</li>
+        <li>Track your application statuses in real-time</li>
+    </ul>
+</div>
+
+<div style="text-align: center;">
+    <a href="{{ dashboard_url }}" class="button">Go to Dashboard</a>
+</div>
+
+<p>We're excited to have you on board. If you need any assistance, reach out to our support team.</p>
+{% endblock %}

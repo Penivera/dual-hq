@@ -60,3 +60,78 @@ fn test_openapi_includes_email_verification_endpoints() {
     assert!(paths.contains(&"/auth/verify".to_string()));
     assert!(paths.contains(&"/auth/resend-verification".to_string()));
 }
+
+#[test]
+fn test_askama_verification_template_rendering() {
+    use askama::Template;
+    use internship_api::email::VerificationTemplate;
+
+    let tmpl = VerificationTemplate {
+        user_name: "Jane Doe",
+        verify_url: "https://example.com/api/auth/verify?token=tok123",
+        verification_token: "tok123",
+    };
+    let html = tmpl.render().expect("Should render verification template");
+    assert!(html.contains("Jane Doe"));
+    assert!(html.contains("https://example.com/api/auth/verify?token=tok123"));
+    assert!(html.contains("tok123"));
+    assert!(html.contains("Internship Portal"));
+}
+
+#[test]
+fn test_askama_welcome_template_rendering() {
+    use askama::Template;
+    use internship_api::email::WelcomeTemplate;
+
+    let tmpl = WelcomeTemplate {
+        user_name: "John Smith",
+        dashboard_url: "https://example.com/dashboard",
+    };
+    let html = tmpl.render().expect("Should render welcome template");
+    assert!(html.contains("John Smith"));
+    assert!(html.contains("Your Account is Verified"));
+    assert!(html.contains("https://example.com/dashboard"));
+}
+
+#[test]
+fn test_askama_new_opportunity_template_rendering() {
+    use askama::Template;
+    use internship_api::email::NewOpportunityTemplate;
+
+    let tmpl = NewOpportunityTemplate {
+        student_name: "Alex",
+        title: "Rust Backend Engineer",
+        company_name: "Dual HQ",
+        location: "Remote",
+        opp_type: "Internship",
+        stipend: "$3000/mo",
+        view_url: "https://example.com/opportunities/42",
+    };
+    let html = tmpl.render().expect("Should render new opportunity template");
+    assert!(html.contains("Alex"));
+    assert!(html.contains("Rust Backend Engineer"));
+    assert!(html.contains("Dual HQ"));
+    assert!(html.contains("Remote"));
+    assert!(html.contains("$3000/mo"));
+    assert!(html.contains("https://example.com/opportunities/42"));
+}
+
+#[test]
+fn test_askama_application_accepted_template_rendering() {
+    use askama::Template;
+    use internship_api::email::ApplicationAcceptedTemplate;
+
+    let tmpl = ApplicationAcceptedTemplate {
+        applicant_name: "Sarah Connor",
+        opportunity_title: "Systems Architect Intern",
+        company_name: "Tech Corp",
+        next_steps: "Complete onboarding forms by Friday.",
+        dashboard_url: "https://example.com/dashboard/applications",
+    };
+    let html = tmpl.render().expect("Should render application accepted template");
+    assert!(html.contains("Sarah Connor"));
+    assert!(html.contains("Systems Architect Intern"));
+    assert!(html.contains("Tech Corp"));
+    assert!(html.contains("Complete onboarding forms by Friday."));
+    assert!(html.contains("ACCEPTED"));
+}

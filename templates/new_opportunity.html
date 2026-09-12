@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}New Opportunity: {{ title }} at {{ company_name }}{% endblock %}
+
+{% block content %}
+<h2>New Opportunity Available! 🚀</h2>
+<p>Hi {{ student_name }},</p>
+<p>A new listing matching student profiles was just posted on the portal:</p>
+
+<div class="card">
+    <h3 style="margin-top: 0; color: #1e293b; font-size: 18px;">{{ title }}</h3>
+    <table style="width: 100%; border-collapse: collapse; margin-top: 12px;">
+        <tr>
+            <td style="padding: 6px 0; color: #64748b; font-weight: 500; width: 110px;">Company:</td>
+            <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">{{ company_name }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; color: #64748b; font-weight: 500;">Location:</td>
+            <td style="padding: 6px 0; color: #0f172a;">{{ location }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; color: #64748b; font-weight: 500;">Type:</td>
+            <td style="padding: 6px 0; color: #0f172a;"><span class="badge" style="background-color: #e0f2fe; color: #0284c7;">{{ opp_type }}</span></td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; color: #64748b; font-weight: 500;">Stipend:</td>
+            <td style="padding: 6px 0; color: #0f172a;">{{ stipend }}</td>
+        </tr>
+    </table>
+    <div style="text-align: center; margin-top: 18px;">
+        <a href="{{ view_url }}" class="button">View & Apply Now</a>
+    </div>
+</div>
+
+<p style="color: #64748b; font-size: 13px;">
+    You received this notification because you are a registered student on the Internship Portal.
+</p>
+{% endblock %}

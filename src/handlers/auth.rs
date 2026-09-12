@@ -172,7 +172,14 @@ pub async fn verify_email(
     let mut active: user::ActiveModel = user.into();
     active.is_verified = Set(true);
     active.verification_token = Set(None);
-    active.update(&state.db).await?;
+    let updated = active.update(&state.db).await?;
+
+    // Dispatch asynchronous welcome email to the newly verified user
+    crate::email::send_welcome_email(
+        state.config.clone(),
+        updated.email,
+        updated.full_name,
+    );
 
     Ok(Json(crate::schemas::auth::VerificationResponse {
         message: "Email verified successfully! You can now log in and apply for internships.".to_string(),
