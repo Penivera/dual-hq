@@ -25,6 +25,9 @@ pub struct Model {
     pub email: String,
     pub hashed_password: String,
     pub role: UserRole,
+    #[sea_orm(default_value = false)]
+    pub is_verified: bool,
+    pub verification_token: Option<String>,
     pub created_at: DateTimeWithTimeZone,
     #[sea_orm(has_many)]
     pub applications: HasMany<super::application::Entity>,

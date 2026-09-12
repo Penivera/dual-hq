@@ -125,6 +125,37 @@ pub async fn create_opportunity(
     };
 
     let opp = new_opp.insert(&state.db).await?;
+
+    // Trigger notification hook for all registered student/applicant users
+    let db_clone = state.db.clone();
+    let config_clone = state.config.clone();
+    let opp_id = opp.id;
+    let title = opp.title.clone();
+    let company = opp.company.clone();
+    let location = opp.location.clone();
+    let opp_type = format!("{:?}", opp.type_);
+    tokio::spawn(async move {
+        if let Ok(students) = crate::entities::User::find()
+            .filter(crate::entities::user::Column::Role.eq(crate::entities::user::UserRole::Applicant))
+            .all(&db_clone)
+            .await
+        {
+            for student in students {
+                crate::email::send_new_opportunity_notification_email(
+                    config_clone.clone(),
+                    student.email,
+                    student.full_name,
+                    title.clone(),
+                    company.clone(),
+                    location.clone(),
+                    opp_type.clone(),
+                    None,
+                    opp_id,
+                );
+            }
+        }
+    });
+
     Ok((StatusCode::CREATED, Json(model_to_response(opp))))
 }
 

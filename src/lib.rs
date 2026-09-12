@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod config;
 pub mod db;
+pub mod email;
 pub mod entities;
 pub mod errors;
 pub mod graphql;

@@ -130,6 +130,7 @@ pub struct UserGql {
     pub full_name: String,
     pub email: String,
     pub role: String,
+    pub is_verified: bool,
     pub created_at: String,
 }
 
@@ -533,6 +534,7 @@ impl QueryRoot {
                     UserRole::Admin => "admin".to_string(),
                     UserRole::Applicant => "applicant".to_string(),
                 },
+                is_verified: u.is_verified,
                 created_at: u.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
             })
             .collect();
@@ -779,6 +781,7 @@ impl MutationRoot {
                 UserRole::Admin => "admin".to_string(),
                 UserRole::Applicant => "applicant".to_string(),
             },
+            is_verified: inserted.is_verified,
             created_at: inserted.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
         })
     }
@@ -817,6 +820,7 @@ impl MutationRoot {
                             UserRole::Admin => "admin".to_string(),
                             UserRole::Applicant => "applicant".to_string(),
                         },
+                        is_verified: updated.is_verified,
                         created_at: updated.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
                     });
                 }

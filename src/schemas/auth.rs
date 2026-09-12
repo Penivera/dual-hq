@@ -20,7 +20,24 @@ pub struct UserResponse {
     pub full_name: String,
     pub email: String,
     pub role: UserRole,
+    pub is_verified: bool,
     pub created_at: DateTime<FixedOffset>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct VerifyEmailQuery {
+    pub token: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ResendVerificationRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VerificationResponse {
+    pub message: String,
+    pub is_verified: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

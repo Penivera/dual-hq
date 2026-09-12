@@ -64,6 +64,7 @@ pub async fn ensure_admin(
         );
         let mut active: user::ActiveModel = user.into();
         active.role = Set(UserRole::Admin);
+        active.is_verified = Set(true);
         let updated = active.update(db).await?;
         return Ok(updated);
     }
@@ -75,6 +76,7 @@ pub async fn ensure_admin(
         email: Set(email.to_string()),
         hashed_password: Set(hashed_password),
         role: Set(UserRole::Admin),
+        is_verified: Set(true),
         created_at: Set(chrono::Utc::now().into()),
         ..Default::default()
     };

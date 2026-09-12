@@ -12,6 +12,7 @@ use axum::{
     Json,
 };
 use jsonwebtoken::{encode, EncodingKey, Header};
+use rand_core::RngCore;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde::Deserialize;
 
@@ -19,7 +20,10 @@ use crate::{
     db::AppState,
     entities::{user, User},
     errors::{AppError, ErrorDetail},
-    schemas::auth::{Claims, LoginRequest, Token, UserCreate, UserResponse},
+    schemas::auth::{
+        Claims, LoginRequest, ResendVerificationRequest, Token, UserCreate, UserResponse,
+        VerificationResponse, VerifyEmailQuery,
+    },
 };
 
 pub fn hash_password(password: &str) -> Result<String, AppError> {
@@ -102,26 +106,126 @@ pub async fn register(
 
     let hashed_password = hash_password(&payload.password)?;
 
+    let mut token_bytes = [0u8; 16];
+    rand_core::OsRng.fill_bytes(&mut token_bytes);
+    let verification_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
+
     let new_user = user::ActiveModel {
         full_name: Set(payload.full_name),
         email: Set(payload.email),
         hashed_password: Set(hashed_password),
         role: Set(user::UserRole::Applicant),
+        is_verified: Set(false),
+        verification_token: Set(Some(verification_token.clone())),
         created_at: Set(chrono::Utc::now().into()),
         ..Default::default()
     };
 
     let user = new_user.insert(&state.db).await?;
 
+    // Dispatch asynchronous verification email
+    crate::email::send_verification_email(
+        state.config.clone(),
+        user.email.clone(),
+        user.full_name.clone(),
+        verification_token,
+    );
+
     let response = UserResponse {
         id: user.id,
         full_name: user.full_name,
         email: user.email,
         role: user.role,
+        is_verified: user.is_verified,
         created_at: user.created_at,
     };
 
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/auth/verify",
+    tag = "Auth",
+    params(
+        ("token" = String, Query, description = "Email verification token")
+    ),
+    responses(
+        (status = 200, description = "Email verified successfully", body = VerificationResponse),
+        (status = 400, description = "Invalid or expired token", body = ErrorDetail)
+    )
+)]
+pub async fn verify_email(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<VerifyEmailQuery>,
+) -> Result<Json<VerificationResponse>, AppError> {
+    if query.token.trim().is_empty() {
+        return Err(AppError::Validation("Token cannot be empty".to_string()));
+    }
+
+    let user = User::find()
+        .filter(user::Column::VerificationToken.eq(&query.token))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Validation("Invalid or expired verification token".to_string()))?;
+
+    let mut active: user::ActiveModel = user.into();
+    active.is_verified = Set(true);
+    active.verification_token = Set(None);
+    active.update(&state.db).await?;
+
+    Ok(Json(crate::schemas::auth::VerificationResponse {
+        message: "Email verified successfully! You can now log in and apply for internships.".to_string(),
+        is_verified: true,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/auth/resend-verification",
+    tag = "Auth",
+    request_body = ResendVerificationRequest,
+    responses(
+        (status = 200, description = "Verification email sent", body = VerificationResponse),
+        (status = 404, description = "User not found", body = ErrorDetail)
+    )
+)]
+pub async fn resend_verification(
+    State(state): State<AppState>,
+    Json(payload): Json<ResendVerificationRequest>,
+) -> Result<Json<VerificationResponse>, AppError> {
+    let user = User::find()
+        .filter(user::Column::Email.eq(&payload.email))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User with this email was not found".to_string()))?;
+
+    if user.is_verified {
+        return Ok(Json(VerificationResponse {
+            message: "Email is already verified.".to_string(),
+            is_verified: true,
+        }));
+    }
+
+    let mut token_bytes = [0u8; 16];
+    rand_core::OsRng.fill_bytes(&mut token_bytes);
+    let verification_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
+
+    let mut active: user::ActiveModel = user.clone().into();
+    active.verification_token = Set(Some(verification_token.clone()));
+    active.update(&state.db).await?;
+
+    crate::email::send_verification_email(
+        state.config.clone(),
+        user.email,
+        user.full_name,
+        verification_token,
+    );
+
+    Ok(Json(VerificationResponse {
+        message: "Verification email has been sent. Please check your inbox.".to_string(),
+        is_verified: false,
+    }))
 }
 
 #[utoipa::path(

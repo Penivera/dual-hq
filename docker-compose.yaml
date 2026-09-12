@@ -12,6 +12,14 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - SERVER_PORT=8010
       - JWT_SECRET=${JWT_SECRET}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME}
+      - SMTP_ENABLED=${SMTP_ENABLED}
+      - APP_BASE_URL=${APP_BASE_URL}
     networks:
       - coolify
     volumes:

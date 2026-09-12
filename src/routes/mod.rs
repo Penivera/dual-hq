@@ -29,6 +29,8 @@ use crate::{
     paths(
         auth_handlers::register,
         auth_handlers::login,
+        auth_handlers::verify_email,
+        auth_handlers::resend_verification,
         opp_handlers::list_opportunities,
         opp_handlers::get_opportunity,
         opp_handlers::create_opportunity,
@@ -45,6 +47,7 @@ use crate::{
         schemas(
             UserCreate,
             UserResponse,
+            crate::schemas::auth::VerificationResponse,
             LoginRequest,
             Token,
             UserRole,

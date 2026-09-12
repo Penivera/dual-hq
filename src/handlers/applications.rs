@@ -89,6 +89,18 @@ pub async fn apply(
     };
 
     let app = new_app.insert(&state.db).await?;
+
+    // Send confirmation email to applicant
+    if let Ok(Some(applicant)) = crate::entities::User::find_by_id(user.id).one(&state.db).await {
+        crate::email::send_application_submitted_email(
+            state.config.clone(),
+            applicant.email,
+            applicant.full_name,
+            opp.title,
+            opp.company,
+        );
+    }
+
     Ok((StatusCode::CREATED, Json(model_to_response(app))))
 }
 
@@ -235,6 +247,29 @@ pub async fn update_application_status(
     active.updated_at = Set(chrono::Utc::now().into());
 
     let updated = active.update(&state.db).await?;
+
+    // Send status update notification email to applicant
+    let db_clone = state.db.clone();
+    let config_clone = state.config.clone();
+    let user_id = updated.user_id;
+    let opp_id = updated.opportunity_id;
+    let status_str = format!("{:?}", updated.status);
+    tokio::spawn(async move {
+        if let (Ok(Some(applicant)), Ok(Some(opp))) = (
+            crate::entities::User::find_by_id(user_id).one(&db_clone).await,
+            Opportunity::find_by_id(opp_id).one(&db_clone).await,
+        ) {
+            crate::email::send_application_status_update_email(
+                config_clone,
+                applicant.email,
+                applicant.full_name,
+                opp.title,
+                opp.company,
+                status_str,
+            );
+        }
+    });
+
     Ok(Json(model_to_response(updated)))
 }
 

@@ -19,6 +19,22 @@ pub struct Config {
     pub admin_password: String,
     #[serde(default = "default_admin_name")]
     pub admin_name: String,
+    #[serde(default = "default_smtp_host")]
+    pub smtp_host: String,
+    #[serde(default = "default_smtp_port")]
+    pub smtp_port: u16,
+    #[serde(default = "default_smtp_user")]
+    pub smtp_user: String,
+    #[serde(default = "default_smtp_password")]
+    pub smtp_password: String,
+    #[serde(default = "default_smtp_from_email")]
+    pub smtp_from_email: String,
+    #[serde(default = "default_smtp_from_name")]
+    pub smtp_from_name: String,
+    #[serde(default = "default_smtp_enabled")]
+    pub smtp_enabled: bool,
+    #[serde(default = "default_app_base_url")]
+    pub app_base_url: String,
 }
 
 fn default_database_url() -> String {
@@ -51,6 +67,38 @@ fn default_admin_password() -> String {
 
 fn default_admin_name() -> String {
     "Admin User".to_string()
+}
+
+fn default_smtp_host() -> String {
+    "smtp-relay.brevo.com".to_string()
+}
+
+fn default_smtp_port() -> u16 {
+    587
+}
+
+fn default_smtp_user() -> String {
+    String::new()
+}
+
+fn default_smtp_password() -> String {
+    String::new()
+}
+
+fn default_smtp_from_email() -> String {
+    String::new()
+}
+
+fn default_smtp_from_name() -> String {
+    "Peni Demo".to_string()
+}
+
+fn default_smtp_enabled() -> bool {
+    false
+}
+
+fn default_app_base_url() -> String {
+    "http://localhost:8010".to_string()
 }
 
 impl Config {
