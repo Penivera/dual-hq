@@ -1,7 +1,8 @@
 services:
-  web:
+  api:
     image: ghcr.io/penivera/dual-hq:latest
-    container_name: dual_hq_web
+    pull_policy: always
+    container_name: dual_hq_api
     restart: unless-stopped
     ports:
       - "8010:8010"
