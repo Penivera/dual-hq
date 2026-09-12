@@ -1,7 +1,6 @@
 services:
   web:
     image: ghcr.io/penivera/dual-hq:latest
-    build: .
     container_name: dual_hq_web
     restart: unless-stopped
     ports:
