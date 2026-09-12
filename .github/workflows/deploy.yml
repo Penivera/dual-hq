@@ -44,9 +44,22 @@ jobs:
     steps:
       - name: Trigger Coolify Deployment
         run: |
-          curl -X POST "${{ env.COOLIFY_WEBHOOK }}" \
-               -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
-               -H "Content-Type: application/json" \
-               --fail-with-body \
-               --silent \
-               --show-error
+          if [ -z "$COOLIFY_WEBHOOK" ]; then
+            echo "::notice::COOLIFY_WEBHOOK_URL secret is not configured in GitHub repository secrets. Skipping deployment webhook."
+            exit 0
+          fi
+
+          if [ -n "${{ secrets.COOLIFY_TOKEN }}" ]; then
+            curl -X POST "$COOLIFY_WEBHOOK" \
+                 -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
+                 -H "Content-Type: application/json" \
+                 --fail-with-body \
+                 --silent \
+                 --show-error
+          else
+            curl -X POST "$COOLIFY_WEBHOOK" \
+                 -H "Content-Type: application/json" \
+                 --fail-with-body \
+                 --silent \
+                 --show-error
+          fi
