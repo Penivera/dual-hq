@@ -24,7 +24,9 @@ pub struct ApplicationResponse {
     pub opportunity_id: i32,
     pub cover_letter: Option<String>,
     pub status: ApplicationStatus,
+    #[schema(value_type = String, format = DateTime)]
     pub applied_at: DateTime<FixedOffset>,
+    #[schema(value_type = String, format = DateTime)]
     pub updated_at: DateTime<FixedOffset>,
 }
 
@@ -37,6 +39,12 @@ pub struct ApplicationDetailResponse {
     pub company: String,
     pub cover_letter: Option<String>,
     pub status: ApplicationStatus,
+    #[schema(value_type = String, format = DateTime)]
     pub applied_at: DateTime<FixedOffset>,
+    #[schema(value_type = String, format = DateTime)]
     pub updated_at: DateTime<FixedOffset>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applicant_cv_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applicant_profile_url: Option<String>,
 }

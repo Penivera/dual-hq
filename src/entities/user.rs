@@ -10,8 +10,24 @@ use utoipa::ToSchema;
 pub enum UserRole {
     #[sea_orm(string_value = "applicant")]
     Applicant,
+    #[sea_orm(string_value = "recruiter")]
+    Recruiter,
     #[sea_orm(string_value = "admin")]
     Admin,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, ToSchema,
+)]
+#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "userstatus")]
+#[serde(rename_all = "lowercase")]
+pub enum UserStatus {
+    #[sea_orm(string_value = "pending")]
+    Pending,
+    #[sea_orm(string_value = "active")]
+    Active,
+    #[sea_orm(string_value = "suspended")]
+    Suspended,
 }
 
 #[sea_orm::model]
@@ -25,6 +41,8 @@ pub struct Model {
     pub email: String,
     pub hashed_password: String,
     pub role: UserRole,
+    #[sea_orm(default_value = "active")]
+    pub status: UserStatus,
     #[sea_orm(default_value = false)]
     pub is_verified: bool,
     pub verification_token: Option<String>,

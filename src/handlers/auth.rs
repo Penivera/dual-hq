@@ -11,18 +11,25 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use rand_core::RngCore;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    sea_query::Expr, ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set,
+};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::{
     db::AppState,
-    entities::{user, User},
+    entities::{
+        refresh_token,
+        user::{self, UserRole, UserStatus},
+        RefreshToken, User,
+    },
     errors::{AppError, ErrorDetail},
     schemas::auth::{
-        Claims, LoginRequest, ResendVerificationRequest, Token, UserCreate, UserResponse,
-        VerificationResponse, VerifyEmailQuery,
+        Claims, LoginRequest, RefreshTokenRequest, ResendVerificationRequest, Token, UserCreate,
+        UserResponse, VerificationResponse, VerifyEmailQuery,
     },
 };
 
@@ -51,18 +58,18 @@ pub fn verify_password(password: &str, hashed_password: &str) -> bool {
         .is_ok()
 }
 
-pub fn create_jwt_token(
+pub fn create_jwt_token_with_secs(
     user_id: i32,
     role: &str,
     secret: &str,
-    expiry_hours: i64,
+    expiry_secs: u64,
 ) -> Result<String, AppError> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| AppError::Internal(e.to_string()))?
-        .as_secs() as usize;
+        .as_secs();
 
-    let expiration = now + (expiry_hours as usize * 3600);
+    let expiration = (now + expiry_secs) as usize;
 
     let claims = Claims {
         sub: user_id.to_string(),
@@ -76,6 +83,25 @@ pub fn create_jwt_token(
         &EncodingKey::from_secret(secret.as_bytes()),
     )
     .map_err(|e| AppError::Internal(format!("Failed to create token: {e}")))
+}
+
+pub fn create_jwt_token(
+    user_id: i32,
+    role: &str,
+    secret: &str,
+    expiry_hours: i64,
+) -> Result<String, AppError> {
+    create_jwt_token_with_secs(user_id, role, secret, (expiry_hours * 3600) as u64)
+}
+
+fn generate_random_token_string() -> String {
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn hash_token(raw_token: &str) -> String {
+    format!("{:x}", Sha256::digest(raw_token.as_bytes()))
 }
 
 #[utoipa::path(
@@ -110,16 +136,20 @@ pub async fn register(
     }
 
     let hashed_password = hash_password(&payload.password)?;
+    let verification_token = generate_random_token_string();
 
-    let mut token_bytes = [0u8; 16];
-    rand_core::OsRng.fill_bytes(&mut token_bytes);
-    let verification_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let role = payload.role.unwrap_or(UserRole::Applicant);
+    let status = match role {
+        UserRole::Recruiter => UserStatus::Pending,
+        _ => UserStatus::Active,
+    };
 
     let new_user = user::ActiveModel {
         full_name: Set(payload.full_name),
         email: Set(payload.email),
         hashed_password: Set(hashed_password),
-        role: Set(user::UserRole::Applicant),
+        role: Set(role.clone()),
+        status: Set(status),
         is_verified: Set(false),
         verification_token: Set(Some(verification_token.clone())),
         created_at: Set(chrono::Utc::now().into()),
@@ -128,19 +158,27 @@ pub async fn register(
 
     let user = new_user.insert(&state.db).await?;
 
-    // Dispatch asynchronous verification email
-    crate::email::send_verification_email(
-        state.config.clone(),
-        user.email.clone(),
-        user.full_name.clone(),
-        verification_token,
-    );
+    if role == UserRole::Recruiter {
+        crate::email::send_recruiter_pending_email(
+            state.config.clone(),
+            user.email.clone(),
+            user.full_name.clone(),
+        );
+    } else {
+        crate::email::send_verification_email(
+            state.config.clone(),
+            user.email.clone(),
+            user.full_name.clone(),
+            verification_token,
+        );
+    }
 
     let response = UserResponse {
         id: user.id,
         full_name: user.full_name,
         email: user.email,
         role: user.role,
+        status: user.status,
         is_verified: user.is_verified,
         created_at: user.created_at,
     };
@@ -165,7 +203,7 @@ pub async fn verify_email(
     axum::extract::Query(query): axum::extract::Query<VerifyEmailQuery>,
 ) -> Result<Json<VerificationResponse>, AppError> {
     if query.token.trim().is_empty() {
-        return Err(AppError::Validation("Token cannot be empty".to_string()));
+        return Err(AppError::Validation("Token is required".to_string()));
     }
 
     let user = User::find()
@@ -174,20 +212,19 @@ pub async fn verify_email(
         .await?
         .ok_or_else(|| AppError::Validation("Invalid or expired verification token".to_string()))?;
 
-    let mut active: user::ActiveModel = user.into();
-    active.is_verified = Set(true);
-    active.verification_token = Set(None);
-    let updated = active.update(&state.db).await?;
+    let mut user_active: user::ActiveModel = user.clone().into();
+    user_active.is_verified = Set(true);
+    user_active.verification_token = Set(None);
+    user_active.update(&state.db).await?;
 
-    // Dispatch asynchronous welcome email to the newly verified user
     crate::email::send_welcome_email(
         state.config.clone(),
-        updated.email,
-        updated.full_name,
+        user.email.clone(),
+        user.full_name.clone(),
     );
 
-    Ok(Json(crate::schemas::auth::VerificationResponse {
-        message: "Email verified successfully! You can now log in and apply for internships.".to_string(),
+    Ok(Json(VerificationResponse {
+        message: "Email verified successfully".to_string(),
         is_verified: true,
     }))
 }
@@ -198,46 +235,53 @@ pub async fn verify_email(
     tag = "Auth",
     request_body = ResendVerificationRequest,
     responses(
-        (status = 200, description = "Verification email sent", body = VerificationResponse),
-        (status = 404, description = "User not found", body = ErrorDetail)
+        (status = 200, description = "Verification email resent", body = VerificationResponse),
+        (status = 400, description = "Email already verified or not found", body = ErrorDetail)
     )
 )]
 pub async fn resend_verification(
     State(state): State<AppState>,
     Json(payload): Json<ResendVerificationRequest>,
 ) -> Result<Json<VerificationResponse>, AppError> {
+    if payload.email.trim().is_empty() {
+        return Err(AppError::Validation("Email is required".to_string()));
+    }
+
     let user = User::find()
         .filter(user::Column::Email.eq(&payload.email))
         .one(&state.db)
         .await?
-        .ok_or_else(|| AppError::NotFound("User with this email was not found".to_string()))?;
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
 
     if user.is_verified {
-        return Ok(Json(VerificationResponse {
-            message: "Email is already verified.".to_string(),
-            is_verified: true,
-        }));
+        return Err(AppError::Validation(
+            "Account is already verified".to_string(),
+        ));
     }
 
-    let mut token_bytes = [0u8; 16];
-    rand_core::OsRng.fill_bytes(&mut token_bytes);
-    let verification_token: String = token_bytes.iter().map(|b| format!("{b:02x}")).collect();
-
-    let mut active: user::ActiveModel = user.clone().into();
-    active.verification_token = Set(Some(verification_token.clone()));
-    active.update(&state.db).await?;
+    let new_token = generate_random_token_string();
+    let mut user_active: user::ActiveModel = user.clone().into();
+    user_active.verification_token = Set(Some(new_token.clone()));
+    user_active.update(&state.db).await?;
 
     crate::email::send_verification_email(
         state.config.clone(),
-        user.email,
-        user.full_name,
-        verification_token,
+        user.email.clone(),
+        user.full_name.clone(),
+        new_token,
     );
 
     Ok(Json(VerificationResponse {
-        message: "Verification email has been sent. Please check your inbox.".to_string(),
+        message: "Verification email resent successfully".to_string(),
         is_verified: false,
     }))
+}
+
+#[derive(Deserialize)]
+struct FormLogin {
+    username: Option<String>,
+    email: Option<String>,
+    password: String,
 }
 
 #[utoipa::path(
@@ -246,8 +290,10 @@ pub async fn resend_verification(
     tag = "Auth",
     request_body = LoginRequest,
     responses(
-        (status = 200, description = "Login successful, returns JWT access token", body = Token),
-        (status = 401, description = "Invalid email or password", body = ErrorDetail)
+        (status = 200, description = "Login successful", body = Token),
+        (status = 401, description = "Invalid credentials", body = ErrorDetail),
+        (status = 403, description = "Account pending or suspended", body = ErrorDetail),
+        (status = 422, description = "Validation error", body = ErrorDetail)
     )
 )]
 pub async fn login(
@@ -255,18 +301,14 @@ pub async fn login(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Token>, AppError> {
-    // Determine content type: JSON or x-www-form-urlencoded (OAuth2 standard)
     let content_type = headers
         .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json");
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
 
     let login_data: LoginRequest = if content_type.contains("application/x-www-form-urlencoded") {
-        #[derive(Deserialize)]
-        struct FormLogin {
-            username: Option<String>,
-            email: Option<String>,
-            password: String,
+        if body.is_empty() {
+            return Err(AppError::Validation("Request body cannot be empty".to_string()));
         }
         let form: FormLogin = serde_urlencoded::from_bytes(&body).map_err(|e| {
             AppError::Validation(format!("Invalid form credentials: {e}"))
@@ -301,17 +343,183 @@ pub async fn login(
         ));
     }
 
+    match user.status {
+        UserStatus::Pending => {
+            return Err(AppError::Forbidden(
+                "Your account is pending review by an administrator".to_string(),
+            ));
+        }
+        UserStatus::Suspended => {
+            return Err(AppError::Forbidden(
+                "Your account has been suspended".to_string(),
+            ));
+        }
+        UserStatus::Active => {}
+    }
+
     let role_str = match user.role {
-        user::UserRole::Admin => "admin",
-        user::UserRole::Applicant => "applicant",
+        UserRole::Admin => "admin",
+        UserRole::Recruiter => "recruiter",
+        UserRole::Applicant => "applicant",
     };
 
-    let token = create_jwt_token(
+    // 15-minute access token (900 seconds)
+    let access_token = create_jwt_token_with_secs(
         user.id,
         role_str,
         &state.config.jwt_secret,
-        state.config.jwt_expiry_hours,
+        900,
     )?;
 
-    Ok(Json(Token::new(token)))
+    // 7-day refresh token
+    let raw_refresh_token = generate_random_token_string();
+    let hashed_refresh_token = hash_token(&raw_refresh_token);
+    let refresh_expires_at = chrono::Utc::now() + chrono::Duration::days(7);
+
+    let refresh_entry = refresh_token::ActiveModel {
+        user_id: Set(user.id),
+        token: Set(hashed_refresh_token),
+        expires_at: Set(refresh_expires_at.into()),
+        revoked: Set(false),
+        created_at: Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    refresh_entry.insert(&state.db).await?;
+
+    Ok(Json(Token::new(access_token, raw_refresh_token, 900)))
+}
+
+#[utoipa::path(
+    post,
+    path = "/auth/refresh",
+    tag = "Auth",
+    request_body = RefreshTokenRequest,
+    responses(
+        (status = 200, description = "Token refreshed successfully", body = Token),
+        (status = 401, description = "Invalid or expired refresh token", body = ErrorDetail),
+        (status = 403, description = "Account pending or suspended", body = ErrorDetail)
+    )
+)]
+pub async fn refresh_token(
+    State(state): State<AppState>,
+    Json(payload): Json<RefreshTokenRequest>,
+) -> Result<Json<Token>, AppError> {
+    if payload.refresh_token.trim().is_empty() {
+        return Err(AppError::Unauthorized("Refresh token is required".to_string()));
+    }
+
+    let hashed_token = hash_token(&payload.refresh_token);
+
+    let token_record = RefreshToken::find()
+        .filter(refresh_token::Column::Token.eq(&hashed_token))
+        .filter(refresh_token::Column::Revoked.eq(false))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid or revoked refresh token".to_string()))?;
+
+    if token_record.expires_at < chrono::Utc::now().fixed_offset() {
+        return Err(AppError::Unauthorized("Refresh token has expired".to_string()));
+    }
+
+    let user = User::find_by_id(token_record.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("User not found".to_string()))?;
+
+    match user.status {
+        UserStatus::Pending => {
+            return Err(AppError::Forbidden(
+                "Your account is pending review by an administrator".to_string(),
+            ));
+        }
+        UserStatus::Suspended => {
+            return Err(AppError::Forbidden(
+                "Your account has been suspended".to_string(),
+            ));
+        }
+        UserStatus::Active => {}
+    }
+
+    // Revoke old refresh token (rotation)
+    let mut token_active: refresh_token::ActiveModel = token_record.into();
+    token_active.revoked = Set(true);
+    token_active.update(&state.db).await?;
+
+    let role_str = match user.role {
+        UserRole::Admin => "admin",
+        UserRole::Recruiter => "recruiter",
+        UserRole::Applicant => "applicant",
+    };
+
+    let access_token = create_jwt_token_with_secs(
+        user.id,
+        role_str,
+        &state.config.jwt_secret,
+        900,
+    )?;
+
+    let new_raw_token = generate_random_token_string();
+    let new_hashed = hash_token(&new_raw_token);
+    let refresh_expires_at = chrono::Utc::now() + chrono::Duration::days(7);
+
+    let new_entry = refresh_token::ActiveModel {
+        user_id: Set(user.id),
+        token: Set(new_hashed),
+        expires_at: Set(refresh_expires_at.into()),
+        revoked: Set(false),
+        created_at: Set(chrono::Utc::now().into()),
+        ..Default::default()
+    };
+    new_entry.insert(&state.db).await?;
+
+    Ok(Json(Token::new(access_token, new_raw_token, 900)))
+}
+
+#[utoipa::path(
+    post,
+    path = "/auth/logout",
+    tag = "Auth",
+    request_body(content = Option<RefreshTokenRequest>, description = "Optional refresh token to revoke"),
+    responses(
+        (status = 200, description = "Logged out successfully")
+    )
+)]
+pub async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Option<Json<RefreshTokenRequest>>,
+) -> Result<StatusCode, AppError> {
+    if let Some(Json(req)) = body {
+        if !req.refresh_token.trim().is_empty() {
+            let hashed = hash_token(&req.refresh_token);
+            let _ = RefreshToken::update_many()
+                .filter(refresh_token::Column::Token.eq(hashed))
+                .col_expr(refresh_token::Column::Revoked, Expr::value(true))
+                .exec(&state.db)
+                .await;
+        }
+    }
+
+    // If Bearer token present in header, revoke all refresh tokens for that user as well
+    if let Some(auth_val) = headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+        if let Some(token) = auth_val.strip_prefix("Bearer ").or_else(|| auth_val.strip_prefix("bearer ")) {
+            let mut validation = Validation::default();
+            validation.validate_exp = true;
+            if let Ok(token_data) = decode::<Claims>(
+                token,
+                &DecodingKey::from_secret(state.config.jwt_secret.as_bytes()),
+                &validation,
+            ) {
+                if let Ok(user_id) = token_data.claims.sub.parse::<i32>() {
+                    let _ = RefreshToken::update_many()
+                        .filter(refresh_token::Column::UserId.eq(user_id))
+                        .col_expr(refresh_token::Column::Revoked, Expr::value(true))
+                        .exec(&state.db)
+                        .await;
+                }
+            }
+        }
+    }
+
+    Ok(StatusCode::OK)
 }

@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let app_state = AppState {
-        db,
+        db: db.clone(),
         config: Arc::new(config.clone()),
     };
 
@@ -141,13 +141,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(30)))
         .layer(TraceLayer::new_for_http());
 
+    // Initialize auto-expiry background cron scheduler
+    let sched = tokio_cron_scheduler::JobScheduler::new().await?;
+    let db_for_job = db.clone();
+    sched
+        .add(
+            tokio_cron_scheduler::Job::new_async("0 0 * * * *", move |_uuid, _l| {
+                let db_clone = db_for_job.clone();
+                Box::pin(async move {
+                    if let Err(err) =
+                        internship_api::handlers::opportunities::expire_opportunities(&db_clone)
+                            .await
+                    {
+                        tracing::error!("Error in auto-expiry cron job: {err}");
+                    }
+                })
+            })?,
+        )
+        .await?;
+
+    sched.start().await?;
+
     let addr = format!("{}:{}", config.server_host, config.server_port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Server listening on http://{}", addr);
     tracing::info!("Swagger UI available at http://{}/docs", addr);
     tracing::info!("Admin panel available at http://{}/admin", addr);
 
-    axum::serve(listener, app).await?;
+    let shutdown_fut = shutdown_signal(sched);
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_fut)
+    .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal(mut sched: tokio_cron_scheduler::JobScheduler) {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    tracing::info!("Shutdown signal received, shutting down scheduler and server...");
+    if let Err(e) = sched.shutdown().await {
+        tracing::error!("Error during scheduler shutdown: {e}");
+    }
 }

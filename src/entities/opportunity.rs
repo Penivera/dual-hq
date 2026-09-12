@@ -38,6 +38,9 @@ pub struct Model {
     pub location: String,
     pub type_: OpportunityType,
     pub status: OpportunityStatus,
+    pub created_by: Option<i32>,
+    pub category_id: Option<i32>,
+    pub deadline: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
     #[sea_orm(has_many)]

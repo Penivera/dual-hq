@@ -8,6 +8,7 @@ pub mod graphql;
 pub mod handlers;
 pub mod middleware;
 pub mod migration;
+pub mod notifications;
 pub mod routes;
 pub mod schemas;
 pub mod seed;

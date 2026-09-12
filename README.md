@@ -1,15 +1,17 @@
 # Internship Application System
 
-A REST API for managing internship postings and applicant submissions. It provides role-based access control for applicants and administrators, application status tracking with strict transition validation, asynchronous transactional emails for workflow events, and an administrative panel for system management.
+A REST API for managing internship opportunities, applications, and hiring workflows. It provides role-based access control for applicants, recruiters, and administrators, account lifecycle management, applicant profiles with resume links, opportunity categorization and search filters, background auto-expiry via Tokio Cron Scheduler, rate-limited authentication with token rotation, in-app notifications, and asynchronous transactional emails via Brevo SMTP.
 
 The deployed version is live at https://demo.peni.dev.
 
 ## Stack
 
 - Framework: Axum 0.8 on Tokio
-- ORM: SeaORM with sea-orm-migration (PostgreSQL)
+- ORM: SeaORM 2.0 with sea-orm-migration (PostgreSQL)
 - Database: PostgreSQL
-- Auth: JWT (HMAC-SHA256) with Argon2id password hashing
+- Auth: JWT (HMAC-SHA256) with Argon2id password hashing, SHA-256 refresh tokens
+- Rate Limiting: tower_governor (governor)
+- Scheduling: tokio-cron-scheduler
 - Mail: Lettre with Askama HTML templates (Brevo SMTP)
 - Docs: OpenAPI 3.0 / Swagger UI via Utoipa
 
@@ -40,8 +42,8 @@ cargo test
 | DB_MIN_CONNECTIONS | Minimum idle connections in pool | Optional | 2 |
 | DB_CONNECT_TIMEOUT_SECS | Database connection timeout in seconds | Optional | 5 |
 | DB_IDLE_TIMEOUT_SECS | Idle connection timeout in seconds | Optional | 600 |
-| JWT_SECRET | Secret key for signing and verifying tokens | Optional | super-secret-jwt-key-replace-in-production |
-| JWT_EXPIRY_HOURS | Token lifetime in hours | Optional | 24 |
+| JWT_SECRET | Secret key for signing and verifying access tokens | Optional | super-secret-jwt-key-replace-in-production |
+| JWT_EXPIRY_HOURS | Token lifetime fallback in hours | Optional | 24 |
 | SERVER_HOST | Host interface to bind | Optional | 0.0.0.0 |
 | SERVER_PORT | TCP port to listen on | Optional | 8010 |
 | APP_BASE_URL | Base application URL used in email template links | Optional | http://localhost:8010 |
@@ -51,47 +53,84 @@ cargo test
 | SMTP_HOST | SMTP server hostname | Optional | smtp-relay.brevo.com |
 | SMTP_PORT | SMTP port (587 for STARTTLS, 465 for TLS) | Optional | 587 |
 | SMTP_USER | SMTP login username | Optional | (empty) |
-| SMTP_PASSWORD | SMTP password or Brevo API/SMTP key | Optional | (empty) |
+| SMTP_PASSWORD | SMTP password or Brevo API key | Optional | (empty) |
 | SMTP_FROM_EMAIL | Outgoing sender email address | Optional | (empty) |
 | SMTP_FROM_NAME | Outgoing sender display name | Optional | Peni Demo |
 | SMTP_ENABLED | Master switch for outbound transactional mail | Optional | false |
 
-## Creating an Admin User
+## User Roles and Account Lifecycle
 
-The server checks for an admin user on startup. If no admin exists, it creates one using `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME` from `.env`.
+The system supports three distinct user roles:
 
-To create or promote an admin explicitly via CLI:
+1. Applicant: Default registration role. Accounts are immediately active. Applicants can browse open opportunities, submit and track applications, manage their personal profile and CV link, and receive updates when application statuses change.
+2. Recruiter: Self-registers with role `recruiter`. Newly created recruiter accounts start in `pending` status and cannot log in until approved by an administrator. Once active, recruiters can post opportunities (which go live immediately), modify or delete only their own listings, review applications submitted to their listings (including applicant bio and CV link), and update candidate status.
+3. Admin: Full platform administrator. Can approve pending recruiters, suspend or unsuspend users, create and delete categories, and inspect platform metrics.
 
-```bash
-cargo run --bin seed -- admin@example.com SecretPass123 "Platform Admin"
+User accounts have one of three lifecycle statuses: `pending`, `active`, or `suspended`. Login attempts by pending or suspended users return 403 Forbidden with descriptive error messages. When an admin suspends a user, all of the user's active refresh tokens are immediately revoked.
+
+## Authentication and Token Refresh
+
+- Access Tokens: Signed JWTs valid for 15 minutes.
+- Refresh Tokens: Cryptographically random 256-bit tokens valid for 7 days, stored in hashed format (SHA-256) in the database.
+- Token Rotation: Calling `POST /auth/refresh` verifies the submitted token, revokes it immediately, and issues a fresh access token and refresh token pair.
+- Logout: Calling `POST /auth/logout` revokes the provided refresh token or active session tokens.
+
+## Rate Limiting
+
+Endpoints vulnerable to abuse are rate-limited per IP using `tower_governor`:
+
+- `POST /auth/login`: 10 requests per minute per IP
+- `POST /auth/register`: 10 requests per minute per IP
+- `POST /auth/refresh`: 20 requests per minute per IP
+
+When a client exceeds the quota, the API responds with HTTP 429 Too Many Requests:
+
+```json
+{
+  "detail": "too many requests, slow down"
+}
 ```
 
-Or update an existing user directly in PostgreSQL:
+GET endpoints remain unthrottled.
 
-```sql
-UPDATE users SET role = 'admin' WHERE email = 'john.doe@example.com';
-```
+## Auto-Expiry Background Job
+
+An hourly cron job runs via `tokio-cron-scheduler`. At the top of every hour (`0 0 * * * *`), the job finds all open opportunities whose deadline has passed (`deadline < NOW()`), marks their status as `closed`, and fires an in-app notification to the recruiter who created the listing. The scheduler logs the count of expired records and terminates cleanly on SIGTERM or SIGINT.
 
 ## API Overview
 
 | Method | Path | Auth | Role | Description |
 | --- | --- | --- | --- | --- |
-| POST | /auth/register | No | Public | Register a new user account |
-| POST | /auth/login | No | Public | Authenticate user and receive JWT bearer token |
-| GET | /auth/verify | No | Public | Verify account email via query token |
-| POST | /auth/verify | No | Public | Verify account email via JSON payload |
-| POST | /auth/resend-verification | No | Public | Resend email verification link |
-| GET | /opportunities | Yes | Any | List open opportunities with pagination (page, per_page) |
-| POST | /opportunities | Yes | Admin | Create a new opportunity (broadcasts email to applicants) |
-| GET | /opportunities/{id} | Yes | Any | Fetch single opportunity by ID |
-| PUT | /opportunities/{id} | Yes | Admin | Full update of an opportunity |
-| DELETE | /opportunities/{id} | Yes | Admin | Delete an opportunity |
-| POST | /applications | Yes | Applicant | Apply to an open opportunity |
-| GET | /applications | Yes | Admin | List all applications across the platform |
-| GET | /applications/me | Yes | Applicant | List current user applications with opportunity details joined |
-| GET | /applications/{id} | Yes | Owner/Admin | Fetch application details |
-| PATCH | /applications/{id}/status | Yes | Owner/Admin | Transition application status |
-| DELETE | /applications/{id} | Yes | Applicant | Delete a pending application |
+| POST | /auth/register | No | Public | Register applicant (active) or recruiter (pending) |
+| POST | /auth/login | No | Public | Log in with credentials; returns 15m access token and 7d refresh token |
+| POST | /auth/refresh | No | Public | Rotate refresh token for a new token pair |
+| POST | /auth/logout | Yes/Opt | Public | Revoke refresh tokens |
+| GET | /auth/verify | No | Public | Verify email address via query token |
+| POST | /auth/resend-verification | No | Public | Resend verification email |
+| GET | /opportunities | Yes/Opt | Any | List opportunities with composable filters (`search`, `type`, `location`, `category`) |
+| POST | /opportunities | Yes | Recruiter/Admin | Create opportunity listing (open by default, tracks `created_by`) |
+| GET | /opportunities/{id} | Yes/Opt | Any | Retrieve single opportunity (`application_count` visible to owner/admin only) |
+| PUT | /opportunities/{id} | Yes | Recruiter/Admin | Update opportunity (recruiters restricted to own listings) |
+| DELETE | /opportunities/{id} | Yes | Recruiter/Admin | Delete opportunity (recruiters restricted to own listings) |
+| GET | /categories | No | Public | List all opportunity categories |
+| POST | /categories | Yes | Admin | Create category with auto-generated slug |
+| DELETE | /categories/{id} | Yes | Admin | Delete category by ID |
+| GET | /profile/me | Yes | Applicant | Get current user profile (creates default empty profile if none exists) |
+| PUT | /profile/me | Yes | Applicant | Update user bio and validate CV URL |
+| GET | /profile/{user_id} | Yes | Recruiter/Admin | View applicant profile details |
+| POST | /applications | Yes | Applicant | Submit application to an open listing |
+| GET | /applications | Yes | Recruiter/Admin | List applications (recruiters view only applications to their listings) |
+| GET | /applications/me | Yes | Applicant | List current user applications with opportunity details |
+| GET | /applications/{id} | Yes | Owner/Admin | Get application details (including applicant bio and CV link) |
+| PATCH | /applications/{id}/status | Yes | Owner/Admin | Update candidate status (accepted, rejected, withdrawn) |
+| DELETE | /applications/{id} | Yes | Applicant | Delete pending application |
+| GET | /notifications | Yes | Any | List user notifications (unread first, then newest first) |
+| PATCH | /notifications/{id}/read | Yes | Any | Mark notification as read |
+| PATCH | /notifications/read-all | Yes | Any | Mark all user notifications as read |
+| GET | /admin/recruiters/pending | Yes | Admin | List pending recruiter accounts awaiting approval |
+| PATCH | /admin/recruiters/{id}/approve | Yes | Admin | Approve recruiter account and fire welcome email |
+| PATCH | /admin/users/{id}/suspend | Yes | Admin | Suspend user, revoke all refresh tokens, fire notice email |
+| PATCH | /admin/users/{id}/unsuspend | Yes | Admin | Reactivate user account and fire reactivation email |
 | GET | /health | No | Public | Service health and database connectivity check |
 
 Interactive Swagger documentation is available at `/docs` and OpenAPI JSON at `/api-docs/openapi.json`.
@@ -100,36 +139,39 @@ GraphQL schema and playground are available at `/graphql` and `/playground`.
 
 ## Example Requests
 
-### Register
+### Register as a Recruiter
 
 ```bash
 curl -s -X POST http://localhost:8010/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "full_name": "John Doe",
-    "email": "john.doe@example.com",
-    "password": "Password123!"
+    "full_name": "Jane Recruiter",
+    "email": "jane@techcorp.com",
+    "password": "Password123!",
+    "role": "recruiter"
   }'
 ```
 
 Response:
 ```json
 {
-  "id": 2,
-  "full_name": "John Doe",
-  "email": "john.doe@example.com",
-  "role": "applicant",
-  "created_at": "2026-09-12T01:30:00Z"
+  "id": 5,
+  "full_name": "Jane Recruiter",
+  "email": "jane@techcorp.com",
+  "role": "recruiter",
+  "status": "pending",
+  "is_verified": false,
+  "created_at": "2026-09-12T10:00:00Z"
 }
 ```
 
-### Login
+### Log in (Receiving Token Pair)
 
 ```bash
 curl -s -X POST http://localhost:8010/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "john.doe@example.com",
+    "email": "applicant@example.com",
     "password": "Password123!"
   }'
 ```
@@ -137,122 +179,53 @@ curl -s -X POST http://localhost:8010/auth/login \
 Response:
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwicm9sZSI6ImFwcGxpY2FudCIsImV4cCI6MTc4OTEwMDAwMH0.K3-4-8b_G8u7eG",
-  "token_type": "bearer"
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "8a3f9e2...",
+  "token_type": "bearer",
+  "expires_in": 900
 }
 ```
 
-### Create an Opportunity (Admin)
+### Rotate Refresh Token
 
 ```bash
-curl -s -X POST http://localhost:8010/opportunities \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIiwiZXhwIjoxNzg5MTAwMDAwfQ.abc123" \
+curl -s -X POST http://localhost:8010/auth/refresh \
   -H "Content-Type: application/json" \
   -d '{
-    "title": "Systems Software Engineering Intern",
-    "description": "Design and build high-throughput backend services using Rust and PostgreSQL.",
-    "company": "DualHQ",
-    "location": "Remote",
-    "type": "internship"
+    "refresh_token": "8a3f9e2..."
   }'
 ```
 
-Response:
-```json
-{
-  "id": 1,
-  "title": "Systems Software Engineering Intern",
-  "description": "Design and build high-throughput backend services using Rust and PostgreSQL.",
-  "company": "DualHQ",
-  "location": "Remote",
-  "type": "internship",
-  "status": "open",
-  "created_at": "2026-09-12T01:32:00Z",
-  "updated_at": "2026-09-12T01:32:00Z"
-}
-```
-
-### Apply to an Opportunity
+### Update Applicant Profile
 
 ```bash
-curl -s -X POST http://localhost:8010/applications \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwicm9sZSI6ImFwcGxpY2FudCIsImV4cCI6MTc4OTEwMDAwMH0.K3-4-8b_G8u7eG" \
+curl -s -X PUT http://localhost:8010/profile/me \
+  -H "Authorization: Bearer <access_token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "opportunity_id": 1,
-    "cover_letter": "I have hands-on experience building asynchronous backend APIs in Rust and working with relational databases."
+    "bio": "Systems programmer interested in high-performance backend infrastructure in Rust.",
+    "cv_url": "https://cdn.example.com/resumes/john_doe.pdf"
   }'
 ```
 
-Response:
-```json
-{
-  "id": 1,
-  "user_id": 2,
-  "opportunity_id": 1,
-  "cover_letter": "I have hands-on experience building asynchronous backend APIs in Rust and working with relational databases.",
-  "status": "pending",
-  "applied_at": "2026-09-12T01:35:00Z",
-  "updated_at": "2026-09-12T01:35:00Z"
-}
-```
-
-### Check Applications
+### Filter Opportunities
 
 ```bash
-curl -s -X GET http://localhost:8010/applications/me \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwicm9sZSI6ImFwcGxpY2FudCIsImV4cCI6MTc4OTEwMDAwMH0.K3-4-8b_G8u7eG"
+curl -s -X GET "http://localhost:8010/opportunities?category=engineering&type=internship&location=remote&search=systems"
 ```
 
-Response:
-```json
-[
-  {
-    "id": 1,
-    "user_id": 2,
-    "opportunity_id": 1,
-    "opportunity_title": "Systems Software Engineering Intern",
-    "company": "DualHQ",
-    "cover_letter": "I have hands-on experience building asynchronous backend APIs in Rust and working with relational databases.",
-    "status": "pending",
-    "applied_at": "2026-09-12T01:35:00Z",
-    "updated_at": "2026-09-12T01:35:00Z"
-  }
-]
-```
+## Mail Service
 
-### Update Application Status
+Transactional emails are dispatched via Brevo SMTP using Askama HTML templates. Email events include:
 
-```bash
-curl -s -X PATCH http://localhost:8010/applications/1/status \
-  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIiwiZXhwIjoxNzg5MTAwMDAwfQ.abc123" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "status": "accepted"
-  }'
-```
+- Email verification requests for new applicants
+- Welcome notification upon email verification
+- Notification of new opportunity listings broadcast to registered applicants
+- Application submission confirmation
+- Candidate status update (accepted or rejected)
+- Recruiter registration received notice
+- Recruiter account approval notice
+- User suspension notice
+- User reactivation notice
 
-Response:
-```json
-{
-  "id": 1,
-  "user_id": 2,
-  "opportunity_id": 1,
-  "cover_letter": "I have hands-on experience building asynchronous backend APIs in Rust and working with relational databases.",
-  "status": "accepted",
-  "applied_at": "2026-09-12T01:35:00Z",
-  "updated_at": "2026-09-12T01:40:00Z"
-}
-```
-
-## Deployment
-
-The application is deployed at https://demo.peni.dev.
-
-- Swagger UI is live at https://demo.peni.dev/docs
-- SeaORM Pro admin panel is live at https://demo.peni.dev/admin
-- Health check is accessible at https://demo.peni.dev/health
-
-## Mail
-
-Transactional email is handled via Brevo over SMTP. Emails are sent for five triggers: email verification requests, welcome confirmation on verification, opportunity creation notifications sent to students, application submission confirmations, and application status updates (accepted/rejected). Delivery runs in detached Tokio tasks (`tokio::spawn`), so network latency to the SMTP server does not affect HTTP response times. If `BREVO_API_KEY` or SMTP credentials (`SMTP_USER`, `SMTP_PASSWORD`) are not provided, or `SMTP_ENABLED=false`, the email service logs an info trace and safely skips delivery without failing the HTTP request.
+All email dispatch calls run inside asynchronous Tokio tasks (`tokio::spawn`), preventing network latency to Brevo from delaying HTTP response times.

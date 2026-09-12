@@ -483,6 +483,7 @@ impl QueryRoot {
                 if let Some(eq) = role_f.eq {
                     let role = match eq.to_lowercase().as_str() {
                         "admin" => UserRole::Admin,
+                        "recruiter" | "manager" => UserRole::Recruiter,
                         _ => UserRole::Applicant,
                     };
                     query = query.filter(user::Column::Role.eq(role));
@@ -532,6 +533,7 @@ impl QueryRoot {
                 email: u.email,
                 role: match u.role {
                     UserRole::Admin => "admin".to_string(),
+                    UserRole::Recruiter => "recruiter".to_string(),
                     UserRole::Applicant => "applicant".to_string(),
                 },
                 is_verified: u.is_verified,
@@ -760,6 +762,7 @@ impl MutationRoot {
 
         let role = match data.role.as_deref().unwrap_or("applicant").to_lowercase().as_str() {
             "admin" => UserRole::Admin,
+            "recruiter" | "manager" => UserRole::Recruiter,
             _ => UserRole::Applicant,
         };
 
@@ -768,6 +771,7 @@ impl MutationRoot {
             email: Set(data.email),
             hashed_password: Set(hashed_password),
             role: Set(role),
+            status: Set(crate::entities::user::UserStatus::Active),
             created_at: Set(chrono::Utc::now().fixed_offset()),
             ..Default::default()
         };
@@ -779,6 +783,7 @@ impl MutationRoot {
             email: inserted.email,
             role: match inserted.role {
                 UserRole::Admin => "admin".to_string(),
+                UserRole::Recruiter => "recruiter".to_string(),
                 UserRole::Applicant => "applicant".to_string(),
             },
             is_verified: inserted.is_verified,
@@ -808,6 +813,7 @@ impl MutationRoot {
                     if let Some(role) = data.role {
                         active.role = Set(match role.to_lowercase().as_str() {
                             "admin" => UserRole::Admin,
+                            "recruiter" | "manager" => UserRole::Recruiter,
                             _ => UserRole::Applicant,
                         });
                     }
@@ -818,6 +824,7 @@ impl MutationRoot {
                         email: updated.email,
                         role: match updated.role {
                             UserRole::Admin => "admin".to_string(),
+                            UserRole::Recruiter => "recruiter".to_string(),
                             UserRole::Applicant => "applicant".to_string(),
                         },
                         is_verified: updated.is_verified,

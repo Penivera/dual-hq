@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Account Suspended{% endblock %}
+
+{% block content %}
+<h2>Account Notice</h2>
+<p>Hi {{ user_name }},</p>
+<p>Your account on the Internship Portal has been suspended by an administrator.</p>
+
+{% if !reason.is_empty() %}
+<div class="card">
+    <h3 style="margin-top: 0; color: #0f172a;">Reason Provided</h3>
+    <p style="margin-bottom: 0;">{{ reason }}</p>
+</div>
+{% endif %}
+
+<p>All active sessions and tokens have been revoked. If you believe this action was taken in error, please contact support.</p>
+{% endblock %}

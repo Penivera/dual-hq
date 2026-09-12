@@ -61,6 +61,7 @@ where
 
         let role = match token_data.claims.role.as_str() {
             "admin" => UserRole::Admin,
+            "recruiter" | "manager" => UserRole::Recruiter,
             "applicant" => UserRole::Applicant,
             _ => return Err(AppError::Unauthorized("Could not validate credentials".to_string())),
         };
@@ -85,6 +86,44 @@ where
             return Err(AppError::Forbidden("Applicant access required".to_string()));
         }
         Ok(ApplicantUser(user))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RecruiterUser(pub AuthenticatedUser);
+
+impl<S> FromRequestParts<S> for RecruiterUser
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let user = AuthenticatedUser::from_request_parts(parts, state).await?;
+        if user.role != UserRole::Recruiter {
+            return Err(AppError::Forbidden("Recruiter access required".to_string()));
+        }
+        Ok(RecruiterUser(user))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RecruiterOrAdminUser(pub AuthenticatedUser);
+
+impl<S> FromRequestParts<S> for RecruiterOrAdminUser
+where
+    AppState: FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let user = AuthenticatedUser::from_request_parts(parts, state).await?;
+        if user.role != UserRole::Recruiter && user.role != UserRole::Admin {
+            return Err(AppError::Forbidden("Recruiter or admin access required".to_string()));
+        }
+        Ok(RecruiterOrAdminUser(user))
     }
 }
 

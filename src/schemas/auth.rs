@@ -2,7 +2,7 @@ use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::entities::user::UserRole;
+use crate::entities::user::{UserRole, UserStatus};
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UserCreate {
@@ -12,6 +12,8 @@ pub struct UserCreate {
     pub email: String,
     #[schema(example = "secret123")]
     pub password: String,
+    #[schema(default = "applicant")]
+    pub role: Option<UserRole>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -20,7 +22,9 @@ pub struct UserResponse {
     pub full_name: String,
     pub email: String,
     pub role: UserRole,
+    pub status: UserStatus,
     pub is_verified: bool,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: DateTime<FixedOffset>,
 }
 
@@ -63,17 +67,26 @@ impl LoginRequest {
 pub struct Token {
     pub access_token: String,
     pub token_type: String,
+    pub expires_in: i64,
+    pub refresh_token: String,
     pub token: String,
 }
 
 impl Token {
-    pub fn new(access_token: String) -> Self {
+    pub fn new(access_token: String, refresh_token: String, expires_in: i64) -> Self {
         Self {
             token: access_token.clone(),
             access_token,
             token_type: "bearer".to_string(),
+            expires_in,
+            refresh_token,
         }
     }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

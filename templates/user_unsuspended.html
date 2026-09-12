@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Account Reactivated{% endblock %}
+
+{% block content %}
+<h2>Account Reactivated</h2>
+<p>Hi {{ user_name }},</p>
+<p>Your account on the Internship Portal has been reactivated. You can now log in and resume using the service.</p>
+
+<div style="text-align: center;">
+    <a href="{{ login_url }}" class="button">Log In to Portal</a>
+</div>
+
+<p>Thank you for your patience.</p>
+{% endblock %}

@@ -16,6 +16,8 @@ pub struct OpportunityCreate {
     pub location: String,
     #[serde(rename = "type")]
     pub type_: OpportunityType,
+    pub category_id: Option<i32>,
+    pub deadline: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -27,6 +29,8 @@ pub struct OpportunityUpdate {
     #[serde(rename = "type")]
     pub type_: Option<OpportunityType>,
     pub status: Option<OpportunityStatus>,
+    pub category_id: Option<i32>,
+    pub deadline: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -42,6 +46,8 @@ pub struct OpportunityFullUpdate {
     #[serde(rename = "type")]
     pub type_: OpportunityType,
     pub status: OpportunityStatus,
+    pub category_id: Option<i32>,
+    pub deadline: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -54,7 +60,16 @@ pub struct OpportunityResponse {
     #[serde(rename = "type")]
     pub type_: OpportunityType,
     pub status: OpportunityStatus,
+    pub created_by: Option<i32>,
+    pub category_id: Option<i32>,
+    pub category_name: Option<String>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub deadline: Option<DateTime<FixedOffset>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub application_count: Option<i64>,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: DateTime<FixedOffset>,
+    #[schema(value_type = String, format = DateTime)]
     pub updated_at: DateTime<FixedOffset>,
 }
 
@@ -64,4 +79,9 @@ pub struct PaginationQuery {
     pub per_page: Option<u64>,
     pub skip: Option<u64>,
     pub limit: Option<u64>,
+    pub search: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: Option<OpportunityType>,
+    pub location: Option<String>,
+    pub category: Option<String>,
 }

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Recruiter Account Approved{% endblock %}
+
+{% block content %}
+<h2>Account Approved</h2>
+<p>Hi {{ user_name }},</p>
+<p>Your recruiter account has been approved by our administration team. You may now log in and begin posting opportunities.</p>
+
+<div style="text-align: center;">
+    <a href="{{ login_url }}" class="button">Log In to Portal</a>
+</div>
+
+<div class="card">
+    <h3 style="margin-top: 0; color: #0f172a;">Recruiter Capabilities</h3>
+    <ul style="padding-left: 20px; margin-bottom: 0;">
+        <li>Create and publish internship opportunities</li>
+        <li>Review student applications and profiles</li>
+        <li>Manage the hiring lifecycle for your listings</li>
+    </ul>
+</div>
+{% endblock %}

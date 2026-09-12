@@ -46,6 +46,7 @@ fn test_verification_schemas() {
         full_name: "Test User".to_string(),
         email: "test@example.com".to_string(),
         role: internship_api::entities::user::UserRole::Applicant,
+        status: internship_api::entities::user::UserStatus::Active,
         is_verified: false,
         created_at: chrono::Utc::now().into(),
     };

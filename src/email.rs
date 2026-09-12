@@ -68,6 +68,33 @@ pub struct ApplicationStatusTemplate<'a> {
     pub dashboard_url: &'a str,
 }
 
+#[derive(Template)]
+#[template(path = "recruiter_pending.html")]
+pub struct RecruiterPendingTemplate<'a> {
+    pub user_name: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "recruiter_approved.html")]
+pub struct RecruiterApprovedTemplate<'a> {
+    pub user_name: &'a str,
+    pub login_url: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "user_suspended.html")]
+pub struct UserSuspendedTemplate<'a> {
+    pub user_name: &'a str,
+    pub reason: &'a str,
+}
+
+#[derive(Template)]
+#[template(path = "user_unsuspended.html")]
+pub struct UserUnsuspendedTemplate<'a> {
+    pub user_name: &'a str,
+    pub login_url: &'a str,
+}
+
 // ============================================================================
 // Core SMTP Sending Logic
 // ============================================================================
@@ -390,6 +417,113 @@ pub fn send_new_opportunity_notification_email(
             }
             Err(err) => {
                 tracing::error!("Failed to render new opportunity email template: {}", err);
+            }
+        }
+    });
+}
+
+/// Sends a recruiter registration confirmation email indicating account is pending review.
+pub fn send_recruiter_pending_email(
+    config: Arc<Config>,
+    recruiter_email: String,
+    recruiter_name: String,
+) {
+    tokio::spawn(async move {
+        let template = RecruiterPendingTemplate {
+            user_name: &recruiter_name,
+        };
+
+        match template.render() {
+            Ok(html_body) => {
+                let subject = "Recruiter Registration Received".to_string();
+                if let Err(err) = send_email_smtp(&config, &recruiter_email, Some(&recruiter_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send recruiter pending email to {}: {}", recruiter_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render recruiter pending email template: {}", err);
+            }
+        }
+    });
+}
+
+/// Sends a recruiter approval notification email.
+pub fn send_recruiter_approved_email(
+    config: Arc<Config>,
+    recruiter_email: String,
+    recruiter_name: String,
+) {
+    tokio::spawn(async move {
+        let login_url = format!("{}/login", config.app_base_url.trim_end_matches('/'));
+        let template = RecruiterApprovedTemplate {
+            user_name: &recruiter_name,
+            login_url: &login_url,
+        };
+
+        match template.render() {
+            Ok(html_body) => {
+                let subject = "Your Recruiter Account Has Been Approved".to_string();
+                if let Err(err) = send_email_smtp(&config, &recruiter_email, Some(&recruiter_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send recruiter approved email to {}: {}", recruiter_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render recruiter approved email template: {}", err);
+            }
+        }
+    });
+}
+
+/// Sends an account suspension notification email.
+pub fn send_user_suspended_email(
+    config: Arc<Config>,
+    user_email: String,
+    user_name: String,
+    reason: Option<String>,
+) {
+    tokio::spawn(async move {
+        let reason_str = reason.unwrap_or_default();
+        let template = UserSuspendedTemplate {
+            user_name: &user_name,
+            reason: &reason_str,
+        };
+
+        match template.render() {
+            Ok(html_body) => {
+                let subject = "Account Suspension Notice".to_string();
+                if let Err(err) = send_email_smtp(&config, &user_email, Some(&user_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send user suspended email to {}: {}", user_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render user suspended email template: {}", err);
+            }
+        }
+    });
+}
+
+/// Sends an account reactivation notification email.
+pub fn send_user_unsuspended_email(
+    config: Arc<Config>,
+    user_email: String,
+    user_name: String,
+) {
+    tokio::spawn(async move {
+        let login_url = format!("{}/login", config.app_base_url.trim_end_matches('/'));
+        let template = UserUnsuspendedTemplate {
+            user_name: &user_name,
+            login_url: &login_url,
+        };
+
+        match template.render() {
+            Ok(html_body) => {
+                let subject = "Your Account Has Been Reactivated".to_string();
+                if let Err(err) = send_email_smtp(&config, &user_email, Some(&user_name), &subject, &html_body).await {
+                    tracing::error!("Failed to send user unsuspended email to {}: {}", user_email, err);
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to render user unsuspended email template: {}", err);
             }
         }
     });

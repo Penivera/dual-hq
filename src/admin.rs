@@ -4,7 +4,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use sea_orm::{
@@ -325,8 +325,19 @@ pub async fn admin_account_login(
         return Err(AppError::Unauthorized("Invalid credentials".to_string()));
     }
 
+    match user.status {
+        crate::entities::user::UserStatus::Pending => {
+            return Err(AppError::Forbidden("Your account is pending approval".to_string()));
+        }
+        crate::entities::user::UserStatus::Suspended => {
+            return Err(AppError::Forbidden("Your account has been suspended".to_string()));
+        }
+        crate::entities::user::UserStatus::Active => {}
+    }
+
     let role_str = match user.role {
         UserRole::Admin => "admin",
+        UserRole::Recruiter => "recruiter",
         UserRole::Applicant => "applicant",
     };
 
@@ -356,6 +367,7 @@ pub async fn current_user_info(
 
     let role_str = match db_user.role {
         UserRole::Admin => "admin",
+        UserRole::Recruiter => "recruiter",
         UserRole::Applicant => "user",
     };
 
@@ -497,6 +509,11 @@ pub fn create_admin_router() -> Router<AppState> {
         .route("/api/opportunities/{id}", delete(delete_admin_opportunity))
         .route("/api/applications", get(list_admin_applications))
         .route("/api/applications/{id}", delete(delete_admin_application))
+        // Admin user lifecycle & recruiter approval routes
+        .route("/recruiters/pending", get(crate::handlers::admin::list_pending_recruiters))
+        .route("/recruiters/{id}/approve", patch(crate::handlers::admin::approve_recruiter))
+        .route("/users/{id}/suspend", patch(crate::handlers::admin::suspend_user))
+        .route("/users/{id}/unsuspend", patch(crate::handlers::admin::unsuspend_user))
         // Serve SeaORM Pro frontend assets with SPA fallback to index.html
         .fallback_service(
             ServeDir::new(assets_dir).fallback(ServeFile::new(index_file)),

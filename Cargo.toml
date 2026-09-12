@@ -52,4 +52,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Email & Mailing
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
 askama = "0.12"
+tokio-cron-scheduler = "0.15"
+tower_governor = "0.8"
+governor = "0.10"
+sha2 = "0.10"
+url = "2.5"
 
