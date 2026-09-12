@@ -52,10 +52,76 @@ fn test_openapi_spec_generation() {
     assert!(paths.contains(&"/applications/{id}".to_string()));
     assert!(paths.contains(&"/applications/{id}/status".to_string()));
 
-    // Check bearerAuth security scheme is configured
+    // Check bearerAuth security scheme is configured in components
     assert!(openapi.components.is_some());
-    let components = openapi.components.unwrap();
+    let components = openapi.components.as_ref().unwrap();
     assert!(components.security_schemes.contains_key("bearerAuth"));
+
+    // Serialize to JSON and verify Swagger UI padlock requirements
+    let openapi_json = serde_json::to_value(&openapi).expect("OpenAPI should serialize to JSON");
+
+    let bearer_scheme = &openapi_json["components"]["securitySchemes"]["bearerAuth"];
+    assert_eq!(bearer_scheme["type"], "http");
+    assert_eq!(bearer_scheme["scheme"], "bearer");
+    assert_eq!(bearer_scheme["bearerFormat"], "JWT");
+
+    // Verify protected endpoints include bearerAuth security requirement (padlock in Swagger UI)
+    let protected_routes: &[(&str, &[&str])] = &[
+        ("/opportunities", &["get", "post"]),
+        ("/opportunities/{id}", &["get", "put", "delete"]),
+        ("/applications", &["get", "post"]),
+        ("/applications/me", &["get"]),
+        ("/applications/{id}", &["get", "delete"]),
+        ("/applications/{id}/status", &["patch"]),
+    ];
+
+    for &(path, methods) in protected_routes {
+        for &method in methods {
+            let op = &openapi_json["paths"][path][method];
+            assert!(
+                !op.is_null(),
+                "Expected operation {} {} to exist in OpenAPI spec",
+                method.to_uppercase(),
+                path
+            );
+            let security = op["security"]
+                .as_array()
+                .unwrap_or_else(|| panic!("Expected security array for {} {}", method, path));
+            assert!(
+                security.iter().any(|s| s.get("bearerAuth").is_some()),
+                "Expected bearerAuth padlock security requirement on {} {}",
+                method.to_uppercase(),
+                path
+            );
+        }
+    }
+
+    // Verify public auth endpoints do NOT require bearerAuth
+    let public_routes: &[(&str, &[&str])] = &[
+        ("/auth/register", &["post"]),
+        ("/auth/login", &["post"]),
+        ("/auth/verify", &["get"]),
+        ("/auth/resend-verification", &["post"]),
+    ];
+
+    for &(path, methods) in public_routes {
+        for &method in methods {
+            let op = &openapi_json["paths"][path][method];
+            if !op.is_null() {
+                let security = op.get("security");
+                let has_bearer = security
+                    .and_then(|s| s.as_array())
+                    .map(|arr| arr.iter().any(|s| s.get("bearerAuth").is_some()))
+                    .unwrap_or(false);
+                assert!(
+                    !has_bearer,
+                    "Public endpoint {} {} should not require bearerAuth",
+                    method.to_uppercase(),
+                    path
+                );
+            }
+        }
+    }
 }
 
 #[test]
